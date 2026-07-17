@@ -1,0 +1,37 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Base application theme -->
+    <style name="Theme.LauncherKioscoTGT" parent="Theme.MaterialComponents.Light.NoActionBar">
+        <!-- Colores adaptados al rojo corporativo de TGT -->
+        <item name="colorPrimary">#C8102E</item>
+        <item name="colorPrimaryVariant">#990C23</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+
+        <item name="colorSecondary">#03DAC6</item>
+        <item name="colorSecondaryVariant">#018786</item>
+        <item name="colorOnSecondary">#000000</item>
+
+        <item name="android:statusBarColor">#F8F9FA</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+
+    <!-- Estilo de los botones de la línea -->
+    <style name="BotonCorporativo" parent="Widget.MaterialComponents.Button">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">match_parent</item>
+        <item name="android:layout_columnWeight">1</item>
+        <item name="android:layout_rowWeight">1</item>
+        <item name="android:layout_margin">8dp</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <!-- Rojo TGT para los botones -->
+        <item name="android:backgroundTint">#C8102E</item>
+        <item name="android:textAllCaps">true</item>
+        <item name="android:textSize">16sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="shapeAppearanceOverlay">@style/BordeRedondeado</item>
+    </style>
+
+    <style name="BordeRedondeado">
+        <item name="cornerSize">12dp</item>
+    </style>
+</resources>

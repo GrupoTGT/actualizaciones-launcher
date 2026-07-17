@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:padding="16dp"
+    android:background="#E0E0E0"
+    android:fillViewport="true">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="⚙️ MENÚ SECRETO IT ⚙️"
+            android:textSize="22sp"
+            android:textStyle="bold"
+            android:gravity="center"
+            android:textColor="#333333"
+            android:layout_marginBottom="16dp"/>
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Identificación / Línea del Móvil:" android:textStyle="bold" android:textColor="#333333"/>
+        <EditText android:id="@+id/etUbicacionDisp" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Ej: Seccion Finales linea 4" android:layout_marginBottom="12dp"/>
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Personalización de Logo Corporativo:" android:textStyle="bold" android:textColor="#333333"/>
+        <Button android:id="@+id/btnCambiarLogo" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="🖼️ Seleccionar Imagen de la Galería" android:layout_marginBottom="16dp"/>
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="PANEL DE ASIGNACIÓN DE LÍNEAS (1 - 50)" android:textStyle="bold" android:textColor="#C8102E" android:layout_marginBottom="12dp"/>
+
+        <LinearLayout
+            android:id="@+id/contenedorLineasDinamicas"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_marginBottom="24dp"/>
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Teléfono IT para recibir alertas SMS:" android:textStyle="bold" android:textColor="#C8102E"/>
+        <EditText android:id="@+id/etTelefonoIT" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Ej: +34600123456" android:inputType="phone" android:layout_marginBottom="12dp"/>
+
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Cambiar PIN de seguridad (IT):" android:textStyle="bold" android:textColor="#C8102E"/>
+        <EditText android:id="@+id/etNuevoPin" android:layout_width="match_parent" android:layout_height="wrap_content" android:hint="Dejar en blanco para no cambiar (Actual: 1234)" android:inputType="numberPassword" android:layout_marginBottom="24dp"/>
+
+        <Button
+            android:id="@+id/btnGuardar"
+            android:layout_width="match_parent"
+            android:layout_height="60dp"
+            android:text="💾 GUARDAR Y VOLVER"
+            android:textStyle="bold"
+            android:layout_marginBottom="8dp"/>
+
+        <Button
+            android:id="@+id/btnVolver"
+            android:layout_width="match_parent"
+            android:layout_height="50dp"
+            android:text="VOLVER SIN GUARDAR"
+            android:backgroundTint="#757575"
+            android:textColor="#FFFFFF"
+            android:layout_marginBottom="24dp"/>
+
+        <Button
+            android:id="@+id/btnSalirQuiosco"
+            android:layout_width="match_parent"
+            android:layout_height="60dp"
+            android:text="🔓 DESACTIVAR (IR A AJUSTES)"
+            android:textStyle="bold"
+            android:textColor="#FFFFFF"
+            android:backgroundTint="#C8102E"
+            android:layout_marginBottom="32dp"/>
+
+    </LinearLayout>
+</ScrollView>
