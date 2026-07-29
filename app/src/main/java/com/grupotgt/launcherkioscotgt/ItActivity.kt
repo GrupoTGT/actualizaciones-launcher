@@ -1,147 +1,206 @@
 package com.grupotgt.launcherkioscotgt
 
-import android.app.Activity
+import android.app.admin.DevicePolicyManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
-import android.text.InputType
-import android.view.Gravity
+import android.view.inputmethod.InputMethodManager
 import android.widget.*
 import androidx.appcompat.app.AppCompatActivity
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import org.json.JSONObject
+import java.io.IOException
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class ItActivity : AppCompatActivity() {
 
-    private var uriLogoSeleccionado: String = ""
-    private val PICK_IMAGE_REQUEST = 1001
+    private val URL_GOOGLE_SHEETS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSye0TO9CYH8xXSPy-rCNDOO4UjiNdmp32SiOWLwxsUPI25ZW9rHW44JlAPn38_4vVpJK5Pw6tu5Ct0/pub?output=csv"
+    private val URL_OTA_JSON = "https://grupotgt.github.io/actualizaciones-launcher/version.json"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_it)
 
-        generarCamposLineasDinamicas()
-        cargarDatosGuardados()
+        val spinnerUbicaciones = findViewById<Spinner>(R.id.spinnerUbicaciones)
+        val btnGuardarUbicacion = findViewById<Button>(R.id.btnGuardarUbicacion)
+        val etTelefonoIT = findViewById<EditText>(R.id.etTelefonoIT)
+        val etNuevoPin = findViewById<EditText>(R.id.etNuevoPin)
+        val btnGuardarCredenciales = findViewById<Button>(R.id.btnGuardarCredenciales)
+        val btnTestSincro = findViewById<Button>(R.id.btnTestSincro)
+        val btnForzarOTA = findViewById<Button>(R.id.btnForzarOTA)
+        val btnAbrirAjustesAndroid = findViewById<Button>(R.id.btnAbrirAjustesAndroid)
+        val btnCerrarPanelIT = findViewById<Button>(R.id.btnCerrarPanelIT)
+        val tvEstadoKiosco = findViewById<TextView>(R.id.tvEstadoKiosco)
 
-        findViewById<Button>(R.id.btnCambiarLogo).setOnClickListener {
-            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                addCategory(Intent.CATEGORY_OPENABLE)
-                type = "image/*"
+        val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
+
+        // 1. Rellenar campos de SMS y PIN con lo que ya estuviera guardado
+        etTelefonoIT.setText(prefs.getString("telefono_it", ""))
+        etNuevoPin.setText(prefs.getString("pin_it", "1234"))
+
+        // 2. Extraer dinámicamente los grupos (primera columna) del CSV en caché
+        val listaGrupos = mutableSetOf<String>()
+        try {
+            val csvCache = prefs.getString("csv_cache_data", "") ?: ""
+            if (csvCache.isNotEmpty()) {
+                val lineas = csvCache.split("\n")
+                for (linea in lineas) {
+                    val partes = linea.split(",")
+                    if (partes.isNotEmpty()) {
+                        val grupoExcel = partes[0].trim()
+                        if (grupoExcel.isNotEmpty()) {
+                            listaGrupos.add(grupoExcel)
+                        }
+                    }
+                }
             }
-            startActivityForResult(intent, PICK_IMAGE_REQUEST)
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
 
-        findViewById<Button>(R.id.btnGuardar).setOnClickListener {
-            guardarConfiguracion()
-            finish()
+        if (listaGrupos.isEmpty()) {
+            listaGrupos.add("Seccion Finales linea 4")
         }
 
-        findViewById<Button>(R.id.btnVolver).setOnClickListener {
-            finish()
+        val arrayGrupos = listaGrupos.toTypedArray()
+        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, arrayGrupos)
+        spinnerUbicaciones.adapter = adapter
+
+        val ubicacionActual = prefs.getString("ubicacion_dispositivo", arrayGrupos[0])
+        val indexActual = arrayGrupos.indexOf(ubicacionActual)
+        if (indexActual >= 0) spinnerUbicaciones.setSelection(indexActual)
+
+        // 3. Comprobar estado de Device Owner y obtener versión de la app
+        try {
+            val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+            val adminComponent = ComponentName(this, MyAdminReceiver::class.java)
+            val esDeviceOwner = dpm.isDeviceOwnerApp(packageName)
+            val esAdmin = dpm.isAdminActive(adminComponent)
+
+            val pInfo = packageManager.getPackageInfo(packageName, 0)
+            val versionName = pInfo.versionName ?: "1.0"
+            val versionCode = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                pInfo.longVersionCode.toInt()
+            } else {
+                @Suppress("DEPRECATION")
+                pInfo.versionCode
+            }
+
+            tvEstadoKiosco.text = "• Versión instalada: v$versionName (Code: $versionCode)\n" +
+                    "• Modo Kiosco (Device Owner): ${if (esDeviceOwner) "🟢 ACTIVO" else "🔴 INACTIVO"}\n" +
+                    "• Administrador Activo: ${if (esAdmin) "🟢 SÍ" else "🔴 NO"}"
+        } catch (e: Exception) {
+            tvEstadoKiosco.text = "• Estado de seguridad y versión no disponible"
         }
 
-        findViewById<Button>(R.id.btnSalirQuiosco).setOnClickListener {
+        // 4. Botón Guardar Ubicación
+        btnGuardarUbicacion.setOnClickListener {
+            val seleccionada = spinnerUbicaciones.selectedItem.toString()
+            prefs.edit().putString("ubicacion_dispositivo", seleccionada).apply()
+            Toast.makeText(this, "✅ Ubicación cambiada a: $seleccionada", Toast.LENGTH_SHORT).show()
+        }
+
+        // 5. Botón Guardar Teléfono IT y PIN
+        btnGuardarCredenciales.setOnClickListener {
             try {
-                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
-                intent.data = Uri.parse("package:$packageName")
-                startActivity(intent)
-            } catch (e: Exception) {
-                Toast.makeText(this, "No se pudieron abrir los ajustes", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
+                val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+                currentFocus?.let { view ->
+                    imm.hideSoftInputFromWindow(view.windowToken, 0)
+                }
+            } catch (e: Exception) { e.printStackTrace() }
 
-    private fun generarCamposLineasDinamicas() {
-        val contenedor = findViewById<LinearLayout>(R.id.contenedorLineasDinamicas)
+            val nuevoTel = etTelefonoIT.text.toString().trim()
+            val nuevoPin = etNuevoPin.text.toString().trim()
 
-        for (i in 1..50) {
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(0, 8, 0, 8)
-            }
+            prefs.edit()
+                .putString("telefono_it", nuevoTel)
+                .putString("pin_it", if (nuevoPin.isNotEmpty()) nuevoPin else "1234")
+                .apply()
 
-            val tvInfo = TextView(this).apply {
-                text = "L$i: "
-                setTypeface(null, android.graphics.Typeface.BOLD) // ¡CORREGIDO!
-                layoutParams = LinearLayout.LayoutParams(60, -2)
-            }
-
-            val etNombre = EditText(this).apply {
-                id = i * 100 + 1
-                hint = "Nombre"
-                layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
-            }
-
-            val etNum = EditText(this).apply {
-                id = i * 100 + 2
-                hint = "Teléfono"
-                inputType = InputType.TYPE_CLASS_PHONE
-                layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
-            }
-
-            val swActivo = Switch(this).apply {
-                id = i * 100 + 3
-                isChecked = i <= 6
-            }
-
-            row.addView(tvInfo)
-            row.addView(etNombre)
-            row.addView(etNum)
-            row.addView(swActivo)
-            contenedor.addView(row)
-        }
-    }
-
-    private fun cargarDatosGuardados() {
-        val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
-
-        findViewById<EditText>(R.id.etUbicacionDisp)?.setText(prefs.getString("ubicacion_dispositivo", "Seccion Finales linea 4"))
-        findViewById<EditText>(R.id.etTelefonoIT)?.setText(prefs.getString("telefono_it", ""))
-        uriLogoSeleccionado = prefs.getString("logo_uri_custom", "") ?: ""
-
-        for (i in 1..50) {
-            findViewById<EditText>(i * 100 + 1)?.setText(prefs.getString("nombre$i", ""))
-            findViewById<EditText>(i * 100 + 2)?.setText(prefs.getString("num$i", ""))
-            findViewById<Switch>(i * 100 + 3)?.isChecked = prefs.getBoolean("activa$i", i <= 6)
-        }
-    }
-
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data) // ¡CORREGIDO!
-        if (requestCode == PICK_IMAGE_REQUEST && resultCode == Activity.RESULT_OK && data != null) {
-            data.data?.let { uri ->
-                uriLogoSeleccionado = uri.toString()
-                contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                Toast.makeText(this, "Logo seleccionado correctamente", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-
-    private fun guardarConfiguracion() {
-        val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
-        val editor = prefs.edit()
-
-        editor.putString("ubicacion_dispositivo", findViewById<EditText>(R.id.etUbicacionDisp)?.text.toString())
-        editor.putString("logo_uri_custom", uriLogoSeleccionado)
-        editor.putString("telefono_it", findViewById<EditText>(R.id.etTelefonoIT)?.text.toString())
-
-        val editNuevoPin = findViewById<EditText>(R.id.etNuevoPin)
-        if (editNuevoPin != null && editNuevoPin.text.toString().isNotEmpty()) {
-            editor.putString("pin_it", editNuevoPin.text.toString())
+            Toast.makeText(this, "✅ Configuración de SMS y PIN guardada correctamente", Toast.LENGTH_SHORT).show()
         }
 
-        for (i in 1..50) {
-            val nombre = findViewById<EditText>(i * 100 + 1)?.text.toString()
-            val numero = findViewById<EditText>(i * 100 + 2)?.text.toString()
-            val activa = findViewById<Switch>(i * 100 + 3)?.isChecked ?: (i <= 6)
+        // 6. Botón Forzar Sincronización Cloud
+        btnTestSincro.setOnClickListener {
+            Toast.makeText(this, "🔄 Sincronizando con Google Sheets...", Toast.LENGTH_SHORT).show()
+            val client = OkHttpClient()
+            val request = Request.Builder().url(URL_GOOGLE_SHEETS_CSV).build()
 
-            editor.putString("nombre$i", nombre)
-            editor.putString("num$i", numero)
-            editor.putBoolean("activa$i", activa)
+            client.newCall(request).enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    runOnUiThread { Toast.makeText(this@ItActivity, "❌ Error de red al sincronizar", Toast.LENGTH_LONG).show() }
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    val csvData = response.body?.string()
+                    if (!csvData.isNullOrEmpty()) {
+                        val fechaActual = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault()).format(Date())
+                        prefs.edit()
+                            .putString("csv_cache_data", csvData)
+                            .putString("ultima_sincro", fechaActual)
+                            .apply()
+                        runOnUiThread { Toast.makeText(this@ItActivity, "✅ ¡Sincronización completada! Cierra y abre el panel para refrescar los grupos.", Toast.LENGTH_LONG).show() }
+                    } else {
+                        runOnUiThread { Toast.makeText(this@ItActivity, "⚠️ Respuesta vacía desde el servidor", Toast.LENGTH_LONG).show() }
+                    }
+                }
+            })
         }
 
-        editor.apply()
-        Toast.makeText(this, "✅ Configuración industrial actualizada", Toast.LENGTH_SHORT).show()
+        // 7. Botón Forzar OTA manual
+        btnForzarOTA.setOnClickListener {
+            Toast.makeText(this, "🔍 Buscando actualizaciones en GitHub...", Toast.LENGTH_SHORT).show()
+            val client = OkHttpClient()
+            val request = Request.Builder().url(URL_OTA_JSON).build()
+
+            client.newCall(request).enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    runOnUiThread { Toast.makeText(this@ItActivity, "❌ Sin conexión para buscar actualizaciones", Toast.LENGTH_LONG).show() }
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    try {
+                        val jsonStr = response.body?.string() ?: return
+                        val jsonObject = JSONObject(jsonStr)
+                        val versionNube = jsonObject.getInt("versionCode")
+                        val pInfo = packageManager.getPackageInfo(packageName, 0)
+                        val versionActual = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                            pInfo.longVersionCode.toInt()
+                        } else {
+                            @Suppress("DEPRECATION")
+                            pInfo.versionCode
+                        }
+
+                        runOnUiThread {
+                            if (versionNube > versionActual) {
+                                Toast.makeText(this@ItActivity, "🚀 ¡Nueva versión disponible (v$versionNube)! Descargando...", Toast.LENGTH_LONG).show()
+                            } else {
+                                Toast.makeText(this@ItActivity, "✨ El terminal ya está actualizado a la última versión (v$versionActual)", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    } catch (ex: Exception) {
+                        runOnUiThread { Toast.makeText(this@ItActivity, "⚠️ Error procesando el archivo JSON de versión", Toast.LENGTH_SHORT).show() }
+                    }
+                }
+            })
+        }
+
+        // 8. Abrir ajustes generales
+        btnAbrirAjustesAndroid.setOnClickListener {
+            startActivity(Intent(Settings.ACTION_SETTINGS))
+        }
+
+        // 9. Cerrar panel IT
+        btnCerrarPanelIT.setOnClickListener {
+            finish()
+        }
     }
 }
