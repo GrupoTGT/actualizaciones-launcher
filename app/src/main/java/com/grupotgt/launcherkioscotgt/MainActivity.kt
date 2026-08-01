@@ -65,7 +65,7 @@ import java.util.Locale
 // =======================================================
 object AppLog {
     private val historial = mutableListOf<String>()
-    private const val MAX_LOGS = 50
+    private const val MAX_LOGS = 60
 
     fun registrar(mensaje: String) {
         val timeStamp = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
@@ -87,19 +87,40 @@ object AppLog {
 }
 
 // =======================================================
-// RECEPTOR ESTÁTICO CON LOGS
+// RECEPTOR ESTÁTICO CON LOGS DETALLADOS DE INSTALACIÓN OTA
 // =======================================================
 class ApkInstallReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context?, intent: Intent?) {
         val status = intent?.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
-        if (status == PackageInstaller.STATUS_SUCCESS) {
-            AppLog.registrar("🎉 ¡Actualización aplicada con éxito!")
-            Toast.makeText(context, "🎉 ¡Actualización aplicada con éxito!", Toast.LENGTH_LONG).show()
-        } else {
-            val msg = intent?.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "Desconocido"
-            val errorCode = intent?.getIntExtra(PackageInstaller.EXTRA_STATUS, -99) ?: -99
-            AppLog.registrar("❌ FALLO INSTALACIÓN [Cod: $errorCode]: $msg")
-            Toast.makeText(context, "❌ FALLO INSTALACIÓN [Cod: $errorCode]: $msg", Toast.LENGTH_LONG).show()
+        val msg = intent?.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "Sin mensaje adicional"
+
+        when (status) {
+            PackageInstaller.STATUS_SUCCESS -> {
+                AppLog.registrar("🎉 ¡Actualización OTA aplicada con éxito!")
+                Toast.makeText(context, "🎉 ¡Actualización aplicada con éxito!", Toast.LENGTH_LONG).show()
+            }
+            PackageInstaller.STATUS_FAILURE_ABORTED -> {
+                AppLog.registrar("❌ OTA Cancelada por el usuario o sistema [Msg: $msg]")
+            }
+            PackageInstaller.STATUS_FAILURE_BLOCKED -> {
+                AppLog.registrar("❌ OTA Bloqueada por políticas de seguridad [Msg: $msg]")
+            }
+            PackageInstaller.STATUS_FAILURE_CONFLICT -> {
+                AppLog.registrar("❌ OTA Conflicto de versión o paquete [Msg: $msg]")
+            }
+            PackageInstaller.STATUS_FAILURE_INCOMPATIBLE -> {
+                AppLog.registrar("❌ OTA Incompatible con el dispositivo [Msg: $msg]")
+            }
+            PackageInstaller.STATUS_FAILURE_INVALID -> {
+                AppLog.registrar("❌ OTA APK Inválida o corrupta [Msg: $msg]")
+            }
+            PackageInstaller.STATUS_FAILURE_STORAGE -> {
+                AppLog.registrar("❌ OTA Error de almacenamiento insuficiente [Msg: $msg]")
+            }
+            else -> {
+                AppLog.registrar("❌ FALLO INSTALACIÓN OTA [Cod: $status]: $msg")
+                Toast.makeText(context, "❌ Error OTA [Cod: $status]: $msg", Toast.LENGTH_LONG).show()
+            }
         }
     }
 }
@@ -107,26 +128,21 @@ class ApkInstallReceiver : BroadcastReceiver() {
 @Suppress("DEPRECATION")
 class MainActivity : AppCompatActivity() {
 
-    // ==========================================
-    // ⚙️ CONFIGURACIÓN
-    // ==========================================
     private val URL_GOOGLE_SHEETS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSye0TO9CYH8xXSPy-rCNDOO4UjiNdmp32SiOWLwxsUPI25ZW9rHW44JlAPn38_4vVpJK5Pw6tu5Ct0/pub?output=csv"
     private val URL_OTA_JSON = "https://grupotgt.github.io/actualizaciones-launcher/version.json"
 
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var runnableConsola: Runnable
 
-    // TEMPORIZADOR AUTOMÁTICO CADA 5 MINUTOS (Actualiza teléfonos, avisos y hora de reinicio)
     private val intervaloSyncAgenda = 5 * 60 * 1000L
     private val runnableAutoSyncAgenda = object : Runnable {
         override fun run() {
-            AppLog.registrar("🔄 Sincronización automática periódica (Agenda, Avisos y Reinicio)...")
+            AppLog.registrar("🔄 Sincronización automática periódica...")
             descargarAgendaNube(modoSilencioso = true)
             handler.postDelayed(this, intervaloSyncAgenda)
         }
     }
 
-    // RELOJ EN TIEMPO REAL CADA SEGUNDO (Comprueba también si toca reinicio automático)
     private val runnableReloj = object : Runnable {
         override fun run() {
             actualizarRelojEnPantalla()
@@ -138,7 +154,6 @@ class MainActivity : AppCompatActivity() {
     private var toquesSalida = 0
     private var toquesBateria = 0
     private var toquesWifi = 0
-
     private var contadorVolumenAbajo = 0
     private var contadorVolumenArriba = 0
 
@@ -171,7 +186,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         try {
-            AppLog.registrar("🚀 MainActivity iniciada (Versión 11 con Avisos y Reinicio Programado)")
+            AppLog.registrar("🚀 MainActivity iniciada (Versión 12 - Correo IT Global Fijo)")
             Thread.setDefaultUncaughtExceptionHandler { _, throwable ->
                 val errorMsg = "CRASH: ${throwable.localizedMessage}"
                 AppLog.registrar("💥 $errorMsg")
@@ -228,28 +243,23 @@ class MainActivity : AppCompatActivity() {
             if (horaProgramada.isNotEmpty()) {
                 val horaActualMinuto = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
                 if (horaActualMinuto == horaProgramada) {
-                    AppLog.registrar("🔄 ¡Hora de reinicio automático alcanzada ($horaProgramada)! Reiniciando dispositivo...")
-                    enviarAlertaITCRasante("🔄 Reinicio automático nocturno ejecutado según programación.")
+                    AppLog.registrar("🔄 ¡Hora de reinicio automático alcanzada ($horaProgramada)! Reiniciando...")
+                    enviarAlertaITCRasante("🔄 Reinicio automático nocturno ejecutado.")
 
                     val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
                     val adminName = ComponentName(this, MyAdminReceiver::class.java)
                     if (dpm.isDeviceOwnerApp(packageName)) {
                         dpm.reboot(adminName)
                     } else {
-                        // Fallback si no es device owner completo
-                        val runtime = Runtime.getRuntime()
-                        runtime.exec("reboot")
+                        Runtime.getRuntime().exec("reboot")
                     }
                 }
             }
         } catch (e: Exception) {
-            AppLog.registrar("❌ Error en verificación de reinicio: ${e.message}")
+            AppLog.registrar("❌ Error en reinicio automático: ${e.message}")
         }
     }
 
-    // ==========================================
-    // ☁️ MOTOR DE AGENDA, AVISOS Y REINICIO (CSV)
-    // ==========================================
     private fun actualizarTextoUltimaSincro() {
         try {
             val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
@@ -269,7 +279,7 @@ class MainActivity : AppCompatActivity() {
             val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
             val csvCache = prefs.getString("csv_cache_data", "") ?: ""
             if (csvCache.isNotEmpty()) {
-                AppLog.registrar("📦 Agenda y Avisos cargados desde Caché Local")
+                AppLog.registrar("📦 Agenda cargada desde Caché Local")
                 procesarYConstruirCSV(csvCache)
                 actualizarTextoUltimaSincro()
             }
@@ -303,7 +313,7 @@ class MainActivity : AppCompatActivity() {
                     procesarYConstruirCSV(csvData)
                     actualizarTextoUltimaSincro()
                     if (!modoSilencioso) {
-                        Toast.makeText(this@MainActivity, "✨ ¡Sincronizado con éxito!", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this@MainActivity, "✨ ¡Sincronizado!", Toast.LENGTH_SHORT).show()
                     }
                 }
             }
@@ -320,64 +330,67 @@ class MainActivity : AppCompatActivity() {
             var avisoEncontrado = ""
             var horaReinicioEncontrada = ""
 
-            AppLog.registrar("📄 Total líneas leídas del CSV: ${lineas.size} | Buscando sección: '$grupoFiltro'")
-
             for (linea in lineas) {
                 if (linea.isBlank()) continue
-
-                val partes = if (linea.contains(";")) {
-                    linea.split(";")
-                } else {
-                    linea.split(",")
-                }
+                val partes = if (linea.contains(";")) linea.split(";") else linea.split(",")
 
                 if (partes.size >= 3) {
-                    val grupoExcel = partes[0].trim().replace("\"", "")
+                    val grupoExcel = partes[0].trim().replace("\"", "").replace("\uFEFF", "")
                     val nombreExcel = partes[1].trim().replace("\"", "")
                     val telefonoExcel = partes[2].trim().replace("\"", "")
 
-                    // Columna 4 y 5: Configuración global IT (TelefonoIT y PinIT)
+                    // Buscamos si en CUALQUIER fila del CSV (incluso fuera de nuestro grupo) viene el Correo IT o Teléfono IT global
                     if (partes.size >= 5) {
                         val telefonoITGlobal = partes[3].trim().replace("\"", "")
                         val pinITGlobal = partes[4].trim().replace("\"", "")
+                        prefs.edit().apply {
+                            if (telefonoITGlobal.isNotEmpty()) putString("telefono_it", telefonoITGlobal)
+                            if (pinITGlobal.isNotEmpty()) putString("pin_it", pinITGlobal)
+                        }.apply()
+                    }
 
-                        if (telefonoITGlobal.isNotEmpty() || pinITGlobal.isNotEmpty()) {
-                            prefs.edit().apply {
-                                if (telefonoITGlobal.isNotEmpty()) putString("telefono_it", telefonoITGlobal)
-                                if (pinITGlobal.isNotEmpty()) putString("pin_it", pinITGlobal)
-                            }.apply()
+                    if (partes.size >= 8) {
+                        val correoITGlobal = partes[7].trim().replace("\"", "")
+                        if (correoITGlobal.isNotEmpty() && correoITGlobal.contains("@")) {
+                            prefs.edit().putString("correo_it", correoITGlobal).apply()
                         }
                     }
 
-                    // Columna 6: MensajeAviso por sección
-                    if (partes.size >= 6) {
-                        val textoAviso = partes[5].trim().replace("\"", "")
-                        if (textoAviso.isNotEmpty() && grupoExcel.equals(grupoFiltro.trim(), ignoreCase = true)) {
-                            avisoEncontrado = textoAviso
-                        }
-                    }
-
-                    // Columna 7: HoraReinico (Opcional, formato HH:mm ej: 03:30)
-                    if (partes.size >= 7) {
-                        val horaRein = partes[6].trim().replace("\"", "")
-                        if (horaRein.isNotEmpty() && grupoExcel.equals(grupoFiltro.trim(), ignoreCase = true)) {
-                            horaReinicioEncontrada = horaRein
-                        }
-                    }
-
-                    // Filtrado de botones específicos para esta sección
+                    // Comprobamos si la línea pertenece a nuestra sección para los botones y avisos
                     if (grupoExcel.equals(grupoFiltro.trim(), ignoreCase = true)) {
-                        nuevosBotones.add(Pair(nombreExcel, telefonoExcel))
+
+                        // Mensaje Aviso (Columna 6 / índice 5)
+                        if (partes.size >= 6) {
+                            val textoAviso = partes[5].trim().replace("\"", "")
+                            if (textoAviso.isNotEmpty()) {
+                                avisoEncontrado = textoAviso
+                            }
+                        }
+
+                        // Hora Reinicio (Columna 7 / índice 6)
+                        if (partes.size >= 7) {
+                            val horaRein = partes[6].trim().replace("\"", "")
+                            if (horaRein.isNotEmpty()) {
+                                horaReinicioEncontrada = horaRein
+                            }
+                        }
+
+                        // Añadir botón si tiene nombre y teléfono válidos
+                        if (nombreExcel.isNotEmpty() && telefonoExcel.isNotEmpty()) {
+                            nuevosBotones.add(Pair(nombreExcel, telefonoExcel))
+                        }
                     }
                 }
             }
 
-            // Guardar hora de reinicio en preferencias locales si se especificó en el Excel
             if (horaReinicioEncontrada.isNotEmpty()) {
                 prefs.edit().putString("hora_reinicio_seccion", horaReinicioEncontrada).apply()
             }
 
-            AppLog.registrar("🔍 Grupo filtrado: '$grupoFiltro' | Botones: ${nuevosBotones.size} | Aviso: '$avisoEncontrado' | Reinicio: '$horaReinicioEncontrada'")
+            val correoFinalGuardado = prefs.getString("correo_it", "No configurado")
+            val telefonoFinalGuardado = prefs.getString("telefono_it", "No configurado")
+            AppLog.registrar("🔍 Grupo: '$grupoFiltro' | Botones: ${nuevosBotones.size} | Aviso: '$avisoEncontrado' | Correo IT: '$correoFinalGuardado' | Tel IT: '$telefonoFinalGuardado'")
+
             runOnUiThread {
                 construirPanelDesdeNube(nuevosBotones)
                 actualizarBannerUrgencia(avisoEncontrado)
@@ -407,7 +420,6 @@ class MainActivity : AppCompatActivity() {
         try {
             val panelBase = findViewById<LinearLayout>(R.id.panelBotonesDinamicos)
             panelBase?.removeAllViews()
-
             val listaBotonesUI = mutableListOf<Button>()
 
             for (contacto in listaContactos) {
@@ -469,9 +481,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ==========================================
-    // CONTROL REAL DE TELEFONÍA
-    // ==========================================
     @SuppressLint("MissingPermission")
     private fun colgarLlamadaReal() {
         try {
@@ -830,7 +839,7 @@ class MainActivity : AppCompatActivity() {
 
         val builder = AlertDialog.Builder(this)
             .setTitle("Panel de Acceso IT")
-            .setMessage("Introduce Código o consulta Logs:")
+            .setMessage("Introduce Código de Acceso:")
             .setView(input)
             .setPositiveButton("Entrar") { _, _ ->
                 val codigoMetido = input.text.toString()
@@ -842,70 +851,13 @@ class MainActivity : AppCompatActivity() {
                     startActivity(Intent(this, ItActivity::class.java))
                 } else { iniciarHackeoConsola() }
             }
-            .setNeutralButton("📋 Ver Logs del Sistema") { _, _ ->
-                mostrarDialogoLogsEnPantalla()
-            }
             .setNegativeButton("Cancelar", null)
         builder.show()
     }
 
-    private fun mostrarDialogoLogsEnPantalla() {
-        val contenedorLogs = ScrollView(this).apply {
-            setPadding(30, 30, 30, 30)
-            setBackgroundColor(Color.parseColor("#111111"))
-        }
-        val textoLogs = TextView(this).apply {
-            text = AppLog.obtenerLogs()
-            setTextColor(Color.GREEN)
-            textSize = 13f
-            typeface = Typeface.MONOSPACE
-        }
-        contenedorLogs.addView(textoLogs)
-
-        AlertDialog.Builder(this)
-            .setTitle("📋 Registro de Errores y Actividad (Logs)")
-            .setView(contenedorLogs)
-            .setPositiveButton("Cerrar", null)
-            .setNegativeButton("📤 Enviar Logs por SMS a IT") { _, _ ->
-                enviarLogsPorSms()
-            }
-            .show()
-    }
-
-    private fun enviarLogsPorSms() {
-        Thread {
-            try {
-                val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
-                val numeroIT = prefs.getString("telefono_it", "")
-                if (numeroIT.isNullOrEmpty()) {
-                    runOnUiThread { Toast.makeText(this, "❌ No hay teléfono IT configurado", Toast.LENGTH_SHORT).show() }
-                    return@Thread
-                }
-                val logsCompletos = AppLog.obtenerLogs()
-                val mensajeFinal = "LOGS KIOSCO:\n" + if (logsCompletos.length > 600) logsCompletos.takeLast(600) else logsCompletos
-
-                val smsManager = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-                    getSystemService(SmsManager::class.java) ?: @Suppress("DEPRECATION") SmsManager.getDefault()
-                } else {
-                    @Suppress("DEPRECATION") SmsManager.getDefault()
-                }
-                val parts = smsManager.divideMessage(mensajeFinal)
-                smsManager.sendMultipartTextMessage(numeroIT, null, parts, null, null)
-
-                runOnUiThread {
-                    Toast.makeText(this, "✅ Logs enviados por SMS al número IT", Toast.LENGTH_LONG).show()
-                }
-            } catch (e: Exception) {
-                runOnUiThread {
-                    Toast.makeText(this, "❌ Error enviando logs por SMS: ${e.message}", Toast.LENGTH_LONG).show()
-                }
-            }
-        }.start()
-    }
-
     private fun iniciarHackeoConsola() {
-        AppLog.registrar("⚠️ Intento fallido de PIN IT - Activada consola simulada")
-        enviarAlertaIT("⚠️ ALERTA: Intento de violación de seguridad en menú IT. Captura guardada.")
+        AppLog.registrar("⚠️ Intento fallido de PIN IT - Consola simulada")
+        enviarAlertaIT("⚠️ ALERTA: Intento de violación de seguridad en menú IT.")
         val layoutBase = findViewById<ImageView>(R.id.logoEmpresa)?.parent as? LinearLayout ?: return
         layoutBase.setBackgroundColor(Color.BLACK); layoutBase.removeAllViews()
         (getSystemService(Context.VIBRATOR_SERVICE) as Vibrator).vibrate(2000)
@@ -1027,7 +979,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     // =======================================================
-    // MOTOR OTA CON LOGS DETALLADOS
+    // MOTOR OTA CON LOGS DETALLADOS DE CADA PASO
     // =======================================================
     private fun comprobarActualizacionOTA() {
         val client = OkHttpClient.Builder()
@@ -1038,7 +990,7 @@ class MainActivity : AppCompatActivity() {
         val request = Request.Builder().url(URL_OTA_JSON).build()
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
-                AppLog.registrar("❌ OTA Error Red JSON: ${e.message}")
+                AppLog.registrar("❌ OTA Error Red consultando version.json: ${e.message}")
             }
 
             override fun onResponse(call: Call, response: Response) {
@@ -1064,13 +1016,13 @@ class MainActivity : AppCompatActivity() {
                     AppLog.registrar("ℹ️ OTA Check -> Local: $versionActual | Nube: $versionNube")
 
                     if (versionNube > versionActual) {
-                        AppLog.registrar("🔄 Versión nueva detectada en nube. Descargando...")
+                        AppLog.registrar("🔄 Versión nueva detectada en nube (v$versionNube). Descargando APK desde: $apkUrl")
                         descargarYInstalarAPK(apkUrl)
                     } else {
-                        AppLog.registrar("✅ Aplicación actualizada (versión más reciente).")
+                        AppLog.registrar("✅ Aplicación al día (Local: $versionActual >= Nube: $versionNube).")
                     }
                 } catch (e: Exception) {
-                    AppLog.registrar("❌ Excepción leyendo JSON OTA: ${e.message}")
+                    AppLog.registrar("❌ Excepción procesando JSON OTA: ${e.message}")
                 }
             }
         })
@@ -1085,19 +1037,19 @@ class MainActivity : AppCompatActivity() {
         val request = Request.Builder().url(url).build()
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
-                AppLog.registrar("❌ Error descargando APK: ${e.message}")
+                AppLog.registrar("❌ Error de red descargando APK APK: ${e.message}")
             }
 
             override fun onResponse(call: Call, response: Response) {
                 try {
                     if (!response.isSuccessful) {
-                        AppLog.registrar("❌ Error HTTP en APK: Código ${response.code}")
+                        AppLog.registrar("❌ Error HTTP descargando APK: Código ${response.code}")
                         return
                     }
 
                     val apkData = response.body?.bytes()
                     if (apkData == null || apkData.isEmpty()) {
-                        AppLog.registrar("❌ Error: El APK descargado está vacío (0 bytes)")
+                        AppLog.registrar("❌ Error crítico: El APK descargado está vacío (0 bytes)")
                         return
                     }
 
@@ -1107,10 +1059,10 @@ class MainActivity : AppCompatActivity() {
                     fos.flush()
                     fos.close()
 
-                    AppLog.registrar("✅ APK descargado (${file.length()} bytes). Iniciando instalación...")
+                    AppLog.registrar("✅ APK descargado con éxito (${file.length()} bytes). Iniciando PackageInstaller...")
                     instalarApkSilenciosa(file)
                 } catch (e: Exception) {
-                    AppLog.registrar("❌ Excepción guardando APK: ${e.message}")
+                    AppLog.registrar("❌ Excepción guardando archivo APK local: ${e.message}")
                 }
             }
         })
@@ -1138,13 +1090,13 @@ class MainActivity : AppCompatActivity() {
             val intent = Intent("com.grupotgt.launcherkioscotgt.INSTALL_COMPLETE")
             val pendingIntent = PendingIntent.getBroadcast(
                 this, 0, intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
             session.commit(pendingIntent.intentSender)
 
-            AppLog.registrar("🚀 Sesión de PackageInstaller enviada con éxito.")
+            AppLog.registrar("🚀 Sesión de PackageInstaller enviada a Android con éxito. Esperando broadcast...")
         } catch (e: Exception) {
-            AppLog.registrar("❌ Fallo crítico en PackageInstaller: ${e.message}")
+            AppLog.registrar("❌ Fallo crítico al invocar PackageInstaller: ${e.message}")
         }
     }
 }
