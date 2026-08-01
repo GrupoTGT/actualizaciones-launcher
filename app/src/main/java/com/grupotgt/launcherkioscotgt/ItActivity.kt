@@ -13,6 +13,13 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import org.json.JSONObject
+import java.io.IOException
 
 class ItActivity : AppCompatActivity() {
 
@@ -74,10 +81,58 @@ class ItActivity : AppCompatActivity() {
             mostrarDialogoLogsEnPantalla()
         }
 
-        // Forzar OTA
+        // Forzar OTA conectado al motor real de red
         btnForzarOTA?.setOnClickListener {
-            Toast.makeText(this, "🚀 Verificando actualizaciones en GitHub...", Toast.LENGTH_SHORT).show()
-            AppLog.registrar("🚀 Comprobación manual de OTA desde Panel IT")
+            Toast.makeText(this, "🚀 Comprobando versión en GitHub...", Toast.LENGTH_SHORT).show()
+            AppLog.registrar("🚀 Comprobación manual de OTA iniciada desde Panel IT")
+
+            val client = OkHttpClient.Builder()
+                .followRedirects(true)
+                .followSslRedirects(true)
+                .build()
+
+            val request = Request.Builder().url("https://grupotgt.github.io/actualizaciones-launcher/version.json").build()
+
+            client.newCall(request).enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    AppLog.registrar("❌ OTA Error Red JSON: ${e.message}")
+                    runOnUiThread { Toast.makeText(this@ItActivity, "❌ Error de red al buscar OTA", Toast.LENGTH_SHORT).show() }
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    try {
+                        val jsonStr = response.body?.string()
+                        if (!response.isSuccessful || jsonStr.isNullOrEmpty()) {
+                            AppLog.registrar("❌ OTA JSON Falló: HTTP ${response.code}")
+                            return
+                        }
+
+                        val jsonObject = JSONObject(jsonStr)
+                        val versionNube = jsonObject.getInt("versionCode")
+                        val apkUrl = jsonObject.getString("apkUrl")
+
+                        val pInfo = packageManager.getPackageInfo(packageName, 0)
+                        val versionActual = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                            pInfo.longVersionCode.toInt()
+                        } else {
+                            @Suppress("DEPRECATION")
+                            pInfo.versionCode
+                        }
+
+                        AppLog.registrar("ℹ️ OTA Check Panel IT -> Local: $versionActual | Nube: $versionNube")
+
+                        runOnUiThread {
+                            if (versionNube > versionActual) {
+                                Toast.makeText(this@ItActivity, "✨ ¡Actualización encontrada en nube (v$versionNube)!", Toast.LENGTH_LONG).show()
+                            } else {
+                                Toast.makeText(this@ItActivity, "✅ Estás al día (Local: $versionActual, Nube: $versionNube)", Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    } catch (e: Exception) {
+                        AppLog.registrar("❌ Excepción leyendo JSON OTA en IT: ${e.message}")
+                    }
+                }
+            })
         }
 
         // Ajustes de Android

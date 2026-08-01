@@ -116,13 +116,22 @@ class MainActivity : AppCompatActivity() {
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var runnableConsola: Runnable
 
-    // TEMPORIZADOR AUTOMÁTICO CADA 5 MINUTOS (Actualiza teléfonos y avisos solos)
+    // TEMPORIZADOR AUTOMÁTICO CADA 5 MINUTOS (Actualiza teléfonos, avisos y hora de reinicio)
     private val intervaloSyncAgenda = 5 * 60 * 1000L
     private val runnableAutoSyncAgenda = object : Runnable {
         override fun run() {
-            AppLog.registrar("🔄 Sincronización automática periódica (Teléfonos y Avisos)...")
+            AppLog.registrar("🔄 Sincronización automática periódica (Agenda, Avisos y Reinicio)...")
             descargarAgendaNube(modoSilencioso = true)
             handler.postDelayed(this, intervaloSyncAgenda)
+        }
+    }
+
+    // RELOJ EN TIEMPO REAL CADA SEGUNDO (Comprueba también si toca reinicio automático)
+    private val runnableReloj = object : Runnable {
+        override fun run() {
+            actualizarRelojEnPantalla()
+            verificarHoraReinicioAutomatico()
+            handler.postDelayed(this, 1000)
         }
     }
 
@@ -162,7 +171,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         try {
-            AppLog.registrar("🚀 MainActivity iniciada (Versión Estable)")
+            AppLog.registrar("🚀 MainActivity iniciada (Versión 11 con Avisos y Reinicio Programado)")
             Thread.setDefaultUncaughtExceptionHandler { _, throwable ->
                 val errorMsg = "CRASH: ${throwable.localizedMessage}"
                 AppLog.registrar("💥 $errorMsg")
@@ -193,6 +202,7 @@ class MainActivity : AppCompatActivity() {
             configurarChivatoSincro()
 
             handler.post(runnableEstadoDispositivo)
+            handler.post(runnableReloj)
             handler.postDelayed(runnableAutoSyncAgenda, intervaloSyncAgenda)
 
             val filter = IntentFilter(TelephonyManager.ACTION_PHONE_STATE_CHANGED)
@@ -204,8 +214,41 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun actualizarRelojEnPantalla() {
+        try {
+            val horaActual = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date())
+            findViewById<TextView>(R.id.tvHoraReal)?.text = horaActual
+        } catch (e: Exception) { e.printStackTrace() }
+    }
+
+    private fun verificarHoraReinicioAutomatico() {
+        try {
+            val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
+            val horaProgramada = prefs.getString("hora_reinicio_seccion", "") ?: ""
+            if (horaProgramada.isNotEmpty()) {
+                val horaActualMinuto = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+                if (horaActualMinuto == horaProgramada) {
+                    AppLog.registrar("🔄 ¡Hora de reinicio automático alcanzada ($horaProgramada)! Reiniciando dispositivo...")
+                    enviarAlertaITCRasante("🔄 Reinicio automático nocturno ejecutado según programación.")
+
+                    val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+                    val adminName = ComponentName(this, MyAdminReceiver::class.java)
+                    if (dpm.isDeviceOwnerApp(packageName)) {
+                        dpm.reboot(adminName)
+                    } else {
+                        // Fallback si no es device owner completo
+                        val runtime = Runtime.getRuntime()
+                        runtime.exec("reboot")
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            AppLog.registrar("❌ Error en verificación de reinicio: ${e.message}")
+        }
+    }
+
     // ==========================================
-    // ☁️ MOTOR DE AGENDA AUTOMÁTICO (SOPORTE HÍBRIDO)
+    // ☁️ MOTOR DE AGENDA, AVISOS Y REINICIO (CSV)
     // ==========================================
     private fun actualizarTextoUltimaSincro() {
         try {
@@ -226,7 +269,7 @@ class MainActivity : AppCompatActivity() {
             val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
             val csvCache = prefs.getString("csv_cache_data", "") ?: ""
             if (csvCache.isNotEmpty()) {
-                AppLog.registrar("📦 Agenda cargada desde Caché Local")
+                AppLog.registrar("📦 Agenda y Avisos cargados desde Caché Local")
                 procesarYConstruirCSV(csvCache)
                 actualizarTextoUltimaSincro()
             }
@@ -260,7 +303,7 @@ class MainActivity : AppCompatActivity() {
                     procesarYConstruirCSV(csvData)
                     actualizarTextoUltimaSincro()
                     if (!modoSilencioso) {
-                        Toast.makeText(this@MainActivity, "✨ ¡Sincronizado!", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this@MainActivity, "✨ ¡Sincronizado con éxito!", Toast.LENGTH_SHORT).show()
                     }
                 }
             }
@@ -275,8 +318,9 @@ class MainActivity : AppCompatActivity() {
             val lineas = csvData.replace("\r", "").split("\n")
             val nuevosBotones = mutableListOf<Pair<String, String>>()
             var avisoEncontrado = ""
+            var horaReinicioEncontrada = ""
 
-            AppLog.registrar("📄 Total líneas leídas del CSV: ${lineas.size}")
+            AppLog.registrar("📄 Total líneas leídas del CSV: ${lineas.size} | Buscando sección: '$grupoFiltro'")
 
             for (linea in lineas) {
                 if (linea.isBlank()) continue
@@ -292,8 +336,7 @@ class MainActivity : AppCompatActivity() {
                     val nombreExcel = partes[1].trim().replace("\"", "")
                     val telefonoExcel = partes[2].trim().replace("\"", "")
 
-                    AppLog.registrar("-> Fila leída [Grupo: '$grupoExcel'] [Nombre: '$nombreExcel']")
-
+                    // Columna 4 y 5: Configuración global IT (TelefonoIT y PinIT)
                     if (partes.size >= 5) {
                         val telefonoITGlobal = partes[3].trim().replace("\"", "")
                         val pinITGlobal = partes[4].trim().replace("\"", "")
@@ -306,6 +349,7 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
 
+                    // Columna 6: MensajeAviso por sección
                     if (partes.size >= 6) {
                         val textoAviso = partes[5].trim().replace("\"", "")
                         if (textoAviso.isNotEmpty() && grupoExcel.equals(grupoFiltro.trim(), ignoreCase = true)) {
@@ -313,13 +357,27 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
 
+                    // Columna 7: HoraReinico (Opcional, formato HH:mm ej: 03:30)
+                    if (partes.size >= 7) {
+                        val horaRein = partes[6].trim().replace("\"", "")
+                        if (horaRein.isNotEmpty() && grupoExcel.equals(grupoFiltro.trim(), ignoreCase = true)) {
+                            horaReinicioEncontrada = horaRein
+                        }
+                    }
+
+                    // Filtrado de botones específicos para esta sección
                     if (grupoExcel.equals(grupoFiltro.trim(), ignoreCase = true)) {
                         nuevosBotones.add(Pair(nombreExcel, telefonoExcel))
                     }
                 }
             }
 
-            AppLog.registrar("🔍 Grupo filtrado: '$grupoFiltro' | Botones creados: ${nuevosBotones.size}")
+            // Guardar hora de reinicio en preferencias locales si se especificó en el Excel
+            if (horaReinicioEncontrada.isNotEmpty()) {
+                prefs.edit().putString("hora_reinicio_seccion", horaReinicioEncontrada).apply()
+            }
+
+            AppLog.registrar("🔍 Grupo filtrado: '$grupoFiltro' | Botones: ${nuevosBotones.size} | Aviso: '$avisoEncontrado' | Reinicio: '$horaReinicioEncontrada'")
             runOnUiThread {
                 construirPanelDesdeNube(nuevosBotones)
                 actualizarBannerUrgencia(avisoEncontrado)
@@ -405,7 +463,8 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.tvUbicacionDispositivo)?.setOnLongClickListener {
             val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
             val ultimaSincro = prefs.getString("ultima_sincro", "Nunca")
-            Toast.makeText(this, "🔄 Sincronización: $ultimaSincro", Toast.LENGTH_LONG).show()
+            val horaRein = prefs.getString("hora_reinicio_seccion", "No programado")
+            Toast.makeText(this, "🔄 Sincro: $ultimaSincro\n🔄 Reinicio auto: $horaRein", Toast.LENGTH_LONG).show()
             true
         }
     }
@@ -546,6 +605,7 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
         handler.removeCallbacks(runnableEstadoDispositivo)
         handler.removeCallbacks(runnableAutoSyncAgenda)
+        handler.removeCallbacks(runnableReloj)
         try { unregisterReceiver(callStateReceiver) } catch (e: Exception) {}
     }
 
