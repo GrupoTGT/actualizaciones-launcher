@@ -221,9 +221,8 @@ class MainActivity : AppCompatActivity() {
 
     private var wakeLockLlamada: android.os.PowerManager.WakeLock? = null
 
-    // Listas globales para mapear y permitir llamadas
     private var contactosGuardados = listOf<Pair<String, String>>()
-    private var whitelistGlobal = listOf<String>() // Columna I del Excel
+    private var whitelistGlobal = listOf<String>()
 
     private val runnableAutoSyncAgenda = object : Runnable {
         override fun run() {
@@ -273,13 +272,19 @@ class MainActivity : AppCompatActivity() {
                 val state = intent.getStringExtra(TelephonyManager.EXTRA_STATE)
                 when (state) {
                     TelephonyManager.EXTRA_STATE_RINGING -> {
-                        val numeroEntrante = intent.getStringExtra(TelephonyManager.EXTRA_INCOMING_NUMBER) ?: ""
+                        // 🛠️ SOLUCIÓN AL BUG DEL FIREWALL: Evitar el segundo broadcast nulo de Android
+                        val numeroEntranteRaw = intent.getStringExtra(TelephonyManager.EXTRA_INCOMING_NUMBER)
+                        if (numeroEntranteRaw == null) {
+                            // Ignoramos el evento fantasma que causa el cuelgue accidental
+                            return
+                        }
+
+                        val numeroEntrante = numeroEntranteRaw
                         var nombreCaller = "Centralita / Desconocido"
 
                         val numLimpio = numeroEntrante.replace(" ", "").replace("+34", "").replace("-", "")
 
                         // 🛡️ FIREWALL DE LLAMADAS (Lista Blanca)
-                        // Si hay al menos un número en los contactos o en la columna I, se activa el blindaje.
                         if (whitelistGlobal.isNotEmpty() || contactosGuardados.isNotEmpty()) {
                             val prefs = context?.getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
                             val itPhone = prefs?.getString("telefono_it", "")?.replace(" ", "")?.replace("+34", "") ?: ""
@@ -287,29 +292,29 @@ class MainActivity : AppCompatActivity() {
                             var estaPermitido = false
 
                             if (numLimpio.isNotEmpty()) {
-                                // 1. ¿Está en la columna I (Whitelist Global)?
                                 val enWhitelist = whitelistGlobal.any { it.contains(numLimpio) || numLimpio.contains(it) }
 
-                                // 2. ¿Es un botón de la agenda de la pantalla?
                                 val enBotones = contactosGuardados.any {
                                     val numAgenda = it.second.replace(" ", "").replace("+34", "").replace("-", "")
                                     numAgenda.isNotEmpty() && (numAgenda.contains(numLimpio) || numLimpio.contains(numAgenda))
                                 }
 
-                                // 3. ¿Es el teléfono de IT?
                                 val esIT = itPhone.isNotEmpty() && (itPhone.contains(numLimpio) || numLimpio.contains(itPhone))
 
                                 estaPermitido = enWhitelist || enBotones || esIT
+                            } else {
+                                // Si no hay número (llamada oculta), lo bloqueamos por defecto
+                                estaPermitido = false
                             }
 
                             if (!estaPermitido) {
-                                AppLog.warning("🛡️ FIREWALL ACTIVO: Llamada bloqueada del número '$numeroEntrante' (No está en Lista Blanca).")
+                                AppLog.warning("🛡️ FIREWALL ACTIVO: Llamada bloqueada del número '${if(numeroEntrante.isEmpty()) "Oculto" else numeroEntrante}'.")
                                 colgarLlamadaReal()
-                                return // No encendemos la pantalla ni mostramos el diálogo
+                                return
                             }
                         }
 
-                        // 📱 SI LA LLAMADA ESTÁ PERMITIDA: Identificamos quién es y mostramos pantalla
+                        // 📱 SI LA LLAMADA ESTÁ PERMITIDA:
                         if (numLimpio.isNotEmpty()) {
                             val contactoMatch = contactosGuardados.find {
                                 val numAgenda = it.second.replace(" ", "").replace("+34", "").replace("-", "")
@@ -339,7 +344,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         try {
             AppLog.inicializar(this)
-            AppLog.info("MainActivity iniciada (Versión 25 - WakeLock + Firewall Llamadas)")
+            AppLog.info("MainActivity iniciada (Versión 26 - Firewall Anti-Rebote)")
             Thread.setDefaultUncaughtExceptionHandler { _, throwable ->
                 val errorMsg = "CRASH: ${throwable.localizedMessage}"
                 AppLog.error(errorMsg)
@@ -553,7 +558,6 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
 
-                    // AÑADIDO: Captura de la columna I (índice 8) para la Lista Blanca
                     if (partes.size >= 9) {
                         val numeroPermitido = partes[8].trim().replace("\"", "").replace(" ", "").replace("+34", "").replace("-", "")
                         if (numeroPermitido.isNotEmpty()) {
@@ -591,7 +595,6 @@ class MainActivity : AppCompatActivity() {
             val telefonoFinalGuardado = prefs.getString("telefono_it", "No configurado")
             AppLog.info("Grupo: '$grupoFiltro' | Botones: ${nuevosBotones.size} | Lista Blanca: ${listaNumerosPermitidos.size} | Aviso: '$avisoEncontrado'")
 
-            // Actualizamos las listas globales en memoria
             contactosGuardados = nuevosBotones.toList()
             whitelistGlobal = listaNumerosPermitidos.toList()
 
