@@ -38,6 +38,7 @@ import android.telephony.TelephonyManager
 import android.text.InputType
 import android.view.Gravity
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.View
@@ -221,12 +222,21 @@ class MainActivity : AppCompatActivity() {
     private lateinit var runnableConsola: Runnable
 
     private val intervaloSyncAgenda = 5 * 60 * 1000L
-    private val intervaloCheckOTA = 15 * 60 * 1000L
+    private val intervaloCheckOTA = 2 * 60 * 1000L // ⏱️ Reducido a 2 minutos para agilizar comprobaciones
 
     private var wakeLockLlamada: android.os.PowerManager.WakeLock? = null
 
     private var contactosGuardados = listOf<Pair<String, String>>()
     private var whitelistGlobal = listOf<String>()
+
+    // Variables para el Salvapantallas (Screensaver) Dinámico
+    private var handlerInactividad = Handler(Looper.getMainLooper())
+    private var minutosInactividadConfig = 10 // Valor por defecto de seguridad
+    private var dialogScreensaver: Dialog? = null
+
+    private val runnableScreensaver = Runnable {
+        mostrarScreensaverTGT()
+    }
 
     private val runnableAutoSyncAgenda = object : Runnable {
         override fun run() {
@@ -339,7 +349,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         try {
             AppLog.inicializar(this)
-            AppLog.info("MainActivity iniciada (Versión 29 - Capa Overlays Sistema)")
+            AppLog.info("MainActivity iniciada (Versión 31 - OTA Inmediata y Visible)")
             Thread.setDefaultUncaughtExceptionHandler { _, throwable ->
                 val errorMsg = "CRASH: ${throwable.localizedMessage}"
                 AppLog.error(errorMsg)
@@ -347,6 +357,10 @@ class MainActivity : AppCompatActivity() {
                 android.os.Process.killProcess(android.os.Process.myPid())
                 System.exit(1)
             }
+
+            // Recuperar configuración de inactividad guardada en caché local
+            val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
+            minutosInactividadConfig = prefs.getInt("minutos_inactividad_custom", 10)
 
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O_MR1) {
                 setShowWhenLocked(true)
@@ -391,9 +405,120 @@ class MainActivity : AppCompatActivity() {
             val filter = IntentFilter(TelephonyManager.ACTION_PHONE_STATE_CHANGED)
             registerReceiver(callStateReceiver, filter)
 
+            // Iniciar temporizador de inactividad al arrancar
+            reiniciarTemporizadorInactividad()
+
         } catch (e: Exception) {
             AppLog.error("Error en onCreate: ${e.message}")
             e.printStackTrace()
+        }
+    }
+
+    // --- GESTIÓN GLOBAL DE INACTIVIDAD (TOUCH LISTENER) ---
+    override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
+        reiniciarTemporizadorInactividad()
+        if (dialogScreensaver != null && dialogScreensaver!!.isShowing) {
+            dialogScreensaver?.dismiss()
+            return true // Intercepta el toque que despierta la pantalla
+        }
+        return super.dispatchTouchEvent(ev)
+    }
+
+    private fun reiniciarTemporizadorInactividad() {
+        handlerInactividad.removeCallbacks(runnableScreensaver)
+        val milisegundosEspera = minutosInactividadConfig * 60 * 1000L
+        handlerInactividad.postDelayed(runnableScreensaver, milisegundosEspera)
+    }
+
+    private fun mostrarScreensaverTGT() {
+        if (dialogScreensaver != null && dialogScreensaver!!.isShowing) return
+
+        // Si hay una llamada en curso o entrante, posponer salvapantallas
+        if (dialogLlamadaEntrante?.isShowing == true || dialogLlamadaActiva?.isShowing == true) {
+            reiniciarTemporizadorInactividad()
+            return
+        }
+
+        runOnUiThread {
+            try {
+                dialogScreensaver = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen).apply {
+                    window?.let { win ->
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                            win.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
+                        } else {
+                            @Suppress("DEPRECATION")
+                            win.setType(WindowManager.LayoutParams.TYPE_PHONE)
+                        }
+
+                        win.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                                or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                                or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                                or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                                or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                                or View.SYSTEM_UI_FLAG_FULLSCREEN)
+
+                        @Suppress("DEPRECATION")
+                        win.addFlags(
+                            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                                    WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
+                                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                        )
+                    }
+
+                    val rootLayout = LinearLayout(context).apply {
+                        orientation = LinearLayout.VERTICAL
+                        gravity = Gravity.CENTER
+                        background = GradientDrawable(
+                            GradientDrawable.Orientation.TOP_BOTTOM,
+                            intArrayOf(Color.parseColor("#020617"), Color.parseColor("#0F172A"))
+                        )
+                        setPadding(40, 40, 40, 40)
+                    }
+
+                    val tvHoraGigante = TextView(context).apply {
+                        text = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+                        setTextColor(Color.WHITE)
+                        textSize = 85f
+                        gravity = Gravity.CENTER
+                        setTypeface(null, Typeface.BOLD)
+                    }
+
+                    val tvMarcaTGT = TextView(context).apply {
+                        text = "GRUPO TGT • TERMINAL DE OPERACIONES"
+                        setTextColor(Color.parseColor("#00E5FF"))
+                        textSize = 16f
+                        gravity = Gravity.CENTER
+                        setTypeface(null, Typeface.BOLD)
+                        letterSpacing = 0.2f
+                        layoutParams = LinearLayout.LayoutParams(-2, -2).apply { setMargins(0, 20, 0, 60) }
+                    }
+
+                    val tvAvisoToque = TextView(context).apply {
+                        text = "Toca cualquier parte de la pantalla para volver"
+                        setTextColor(Color.parseColor("#64748B"))
+                        textSize = 14f
+                        gravity = Gravity.CENTER
+                        layoutParams = LinearLayout.LayoutParams(-2, -2).apply { setMargins(0, 40, 0, 0) }
+                    }
+
+                    rootLayout.addView(tvHoraGigante)
+                    rootLayout.addView(tvMarcaTGT)
+                    rootLayout.addView(tvAvisoToque)
+
+                    rootLayout.setOnClickListener {
+                        dismiss()
+                        reiniciarTemporizadorInactividad()
+                    }
+
+                    setContentView(rootLayout)
+                    setCancelable(false)
+                    show()
+                }
+            } catch (e: Exception) {
+                AppLog.error("Error al mostrar Screensaver: ${e.message}")
+            }
         }
     }
 
@@ -560,6 +685,15 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
 
+                    // ⏱️ LECTURA DINÁMICA DE LA COLUMNA DE INACTIVIDAD (Columna 10 / Índice 9)
+                    if (partes.size >= 10) {
+                        val minutosExcel = partes[9].trim().replace("\"", "").toIntOrNull()
+                        if (minutosExcel != null && minutosExcel > 0) {
+                            minutosInactividadConfig = minutosExcel
+                            prefs.edit().putInt("minutos_inactividad_custom", minutosExcel).apply()
+                        }
+                    }
+
                     if (grupoExcel.equals(grupoFiltro.trim(), ignoreCase = true)) {
                         if (partes.size >= 6) {
                             val textoAviso = partes[5].trim().replace("\"", "")
@@ -586,7 +720,7 @@ class MainActivity : AppCompatActivity() {
                 prefs.edit().putString("hora_reinicio_seccion", horaReinicioEncontrada).apply()
             }
 
-            AppLog.info("Grupo: '$grupoFiltro' | Botones: ${nuevosBotones.size} | Lista Blanca: ${listaNumerosPermitidos.size} | Aviso: '$avisoEncontrado'")
+            AppLog.info("Grupo: '$grupoFiltro' | Botones: ${nuevosBotones.size} | Inactividad Config: ${minutosInactividadConfig}m")
 
             contactosGuardados = nuevosBotones.toList()
             whitelistGlobal = listaNumerosPermitidos.toList()
@@ -675,7 +809,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.tvUbicacionDispositivo)?.setOnLongClickListener {
             val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
             val ultimaSincro = prefs.getString("ultima_sincro", "Nunca")
-            Toast.makeText(this, "🔄 Sincro: $ultimaSincro\n🛡️ Num en Lista Blanca: ${whitelistGlobal.size}", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "🔄 Sincro: $ultimaSincro\n⏱️ Inactividad: ${minutosInactividadConfig} min", Toast.LENGTH_LONG).show()
             true
         }
     }
@@ -1094,9 +1228,11 @@ class MainActivity : AppCompatActivity() {
         handler.removeCallbacks(runnableAutoSyncAgenda)
         handler.removeCallbacks(runnableAutoCheckOTA)
         handler.removeCallbacks(runnableReloj)
+        handlerInactividad.removeCallbacks(runnableScreensaver)
         try { unregisterReceiver(callStateReceiver) } catch (e: Exception) {}
 
         try { dialogoOTA?.dismiss() } catch (e: Exception) {}
+        try { dialogScreensaver?.dismiss() } catch (e: Exception) {}
         liberarPantalla()
     }
 
@@ -1147,6 +1283,7 @@ class MainActivity : AppCompatActivity() {
         cargarIdentificacionYLogo()
         cargarAgendaDesdeCache()
         descargarAgendaNube(modoSilencioso = true)
+        reiniciarTemporizadorInactividad()
     }
 
     private fun cargarIdentificacionYLogo() {
@@ -1162,6 +1299,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        reiniciarTemporizadorInactividad()
         if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) contadorVolumenAbajo = 1
         if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) contadorVolumenArriba = 1
 
@@ -1179,6 +1317,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onKeyUp(keyCode: Int, event: KeyEvent?): Boolean {
+        reiniciarTemporizadorInactividad()
         if (keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) contadorVolumenAbajo = 0
         if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) contadorVolumenArriba = 0
         if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) return true
@@ -1520,10 +1659,27 @@ class MainActivity : AppCompatActivity() {
             try {
                 dialogoOTA = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen).apply {
                     window?.let { win ->
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                            win.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
+                        } else {
+                            @Suppress("DEPRECATION")
+                            win.setType(WindowManager.LayoutParams.TYPE_PHONE)
+                        }
+
+                        win.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                                or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                                or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                                or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                                or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                                or View.SYSTEM_UI_FLAG_FULLSCREEN)
+
+                        @Suppress("DEPRECATION")
                         win.addFlags(
                             WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
                                     WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
-                                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+                                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                                    WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
+                                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
                         )
                     }
 
@@ -1640,13 +1796,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun comprobarActualizacionOTA() {
         val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
-        val ultimoIntento = prefs.getLong("ultimo_intento_ota", 0L)
-        val ahora = System.currentTimeMillis()
-
-        if (ahora - ultimoIntento < 5 * 60 * 1000L) {
-            AppLog.warning("OTA Bloqueada temporalmente por el Escudo Anti-Bucle (Cooldown de 5 min).")
-            return
-        }
 
         val client = OkHttpClient.Builder()
             .followRedirects(true)
@@ -1683,8 +1832,6 @@ class MainActivity : AppCompatActivity() {
                     AppLog.info("OTA Check -> Local: $versionActual | Nube: $versionNube")
 
                     if (versionNube > versionActual) {
-                        prefs.edit().putLong("ultimo_intento_ota", System.currentTimeMillis()).apply()
-
                         AppLog.ota("Versión nueva detectada en nube (v$versionNube). Descargando APK desde: $apkUrl")
                         descargarYInstalarAPK(apkUrl)
                     } else {
@@ -1698,6 +1845,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun descargarYInstalarAPK(url: String) {
+        // Asegurar que la pantalla de descarga se lanza inmediatamente en el hilo principal
         mostrarPantallaOTA()
 
         val client = OkHttpClient.Builder()

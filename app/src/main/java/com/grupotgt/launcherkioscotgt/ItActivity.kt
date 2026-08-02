@@ -1,19 +1,23 @@
 package com.grupotgt.launcherkioscotgt
 
+import android.app.ActivityManager
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
+import android.media.AudioManager
 import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.BatteryManager
+import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.os.StatFs
 import android.os.SystemClock
 import android.provider.Settings
+import android.telephony.TelephonyManager
 import android.telephony.SmsManager
 import android.widget.ArrayAdapter
 import android.widget.AutoCompleteTextView
@@ -31,6 +35,8 @@ import okhttp3.Response
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
+import java.net.InetAddress
+import java.net.NetworkInterface
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -49,7 +55,7 @@ class ItActivity : AppCompatActivity() {
         val btnTestSincro = findViewById<Button>(R.id.btnTestSincro)
         val btnVerLogsIt = findViewById<Button>(R.id.btnVerLogsIt)
         val btnForzarOTA = findViewById<Button>(R.id.btnForzarOTA)
-        val btnPurgarApks = findViewById<Button>(R.id.btnPurgarApks) // 🧹 Botón de Purga APKs
+        val btnPurgarApks = findViewById<Button>(R.id.btnPurgarApks)
         val btnAbrirAjustesAndroid = findViewById<Button>(R.id.btnAbrirAjustesAndroid)
         val btnCerrarPanelIT = findViewById<Button>(R.id.btnCerrarPanelIT)
         val tvEstadoKiosco = findViewById<TextView>(R.id.tvEstadoKiosco)
@@ -57,6 +63,9 @@ class ItActivity : AppCompatActivity() {
 
         val tvTelemetriaUptime = findViewById<TextView>(R.id.tvTelemetriaUptime)
         val tvTelemetriaAlmacenamiento = findViewById<TextView>(R.id.tvTelemetriaAlmacenamiento)
+        val tvTelemetriaRed = findViewById<TextView>(R.id.tvTelemetriaRed)
+        val tvTelemetriaMovil = findViewById<TextView>(R.id.tvTelemetriaMovil)
+        val tvTelemetriaHardware = findViewById<TextView>(R.id.tvTelemetriaHardware)
 
         val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
         val ubicacionActual = prefs.getString("ubicacion_dispositivo", "Seccion Finales linea 4")
@@ -64,36 +73,44 @@ class ItActivity : AppCompatActivity() {
 
         cargarSeccionesEnDesplegable(etUbicacion, prefs)
 
-        // CARGAR VERSIÓN REAL DE LA APLICACIÓN
+        // VERSIÓN DE LA APP Y DE ANDROID
         try {
             val pInfo = packageManager.getPackageInfo(packageName, 0)
             val versionName = pInfo.versionName ?: "1.0"
-            val versionCode = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            val versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 pInfo.longVersionCode
             } else {
                 @Suppress("DEPRECATION")
                 pInfo.versionCode.toLong()
             }
-            tvVersionApp?.text = "📱 Versión instalada: v$versionName (Code: $versionCode)"
+            val androidVer = Build.VERSION.RELEASE
+            val sdkVer = Build.VERSION.SDK_INT
+            tvVersionApp?.text = "📱 App: v$versionName ($versionCode) | Android: $sdkVer (v$androidVer)"
         } catch (e: Exception) {
             tvVersionApp?.text = "📱 Versión instalada: Desconocida"
         }
 
         tvEstadoKiosco?.text = "📦 Paquete: $packageName\n🔒 Estado: Kiosco Blindado Activo"
 
-        // CALCULAR UPTIME (TIEMPO ENCENDIDO)
+        // TIEMPO ACTIVO (UPTIME)
         val uptimeMillis = SystemClock.elapsedRealtime()
         val dias = TimeUnit.MILLISECONDS.toDays(uptimeMillis)
         val horas = TimeUnit.MILLISECONDS.toHours(uptimeMillis) % 24
         val minutos = TimeUnit.MILLISECONDS.toMinutes(uptimeMillis) % 60
         tvTelemetriaUptime?.text = "⏱️ Tiempo activo: $dias días, $horas hrs, $minutos min"
 
-        // CALCULAR TELEMETRÍA AVANZADA: ALMACENAMIENTO, WI-FI, BATERÍA Y TEMPERATURA
+        // ALMACENAMIENTO LIBRE
         try {
             val stat = StatFs(Environment.getExternalStorageDirectory().path)
             val bytesDisponibles = stat.availableBlocksLong * stat.blockSizeLong
             val gbDisponibles = bytesDisponibles / (1024 * 1024 * 1024)
+            tvTelemetriaAlmacenamiento?.text = "💾 Almacenamiento Libre: $gbDisponibles GB"
+        } catch (e: Exception) {
+            tvTelemetriaAlmacenamiento?.text = "💾 Almacenamiento Libre: Desconocido"
+        }
 
+        // TELEMETRÍA DE RED: WI-FI, RSSI E IP LOCAL
+        try {
             val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
             val wifiInfo = wifiManager?.connectionInfo
             val rssi = wifiInfo?.rssi ?: -99
@@ -102,26 +119,72 @@ class ItActivity : AppCompatActivity() {
             val calDesc = if (nivelWifi in 0..4) calidades[nivelWifi] else "Desconocida"
             val ssid = wifiInfo?.ssid?.replace("\"", "") ?: "Desconocida"
 
-            val batteryStatus = registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-            val batteryPct = batteryStatus?.let { intent ->
-                val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
-                val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
-                if (level >= 0 && scale > 0) (level * 100) / scale else -1
-            } ?: -1
+            // Obtener IP Local actual
+            var ipLocal = "No disponible"
+            try {
+                val interfaces = NetworkInterface.getNetworkInterfaces()
+                while (interfaces.hasMoreElements()) {
+                    val intf = interfaces.nextElement()
+                    val addrs = intf.inetAddresses
+                    while (addrs.hasMoreElements()) {
+                        val addr = addrs.nextElement()
+                        if (!addr.isLoopbackAddress && addr.hostAddress?.indexOf(':') == -1) {
+                            ipLocal = addr.hostAddress.toString()
+                        }
+                    }
+                }
+            } catch (e: Exception) {}
 
+            tvTelemetriaRed?.text = "📶 Wi-Fi: $ssid ($rssi dBm - $calDesc)\n🌐 IP Local: $ipLocal"
+        } catch (e: Exception) {
+            tvTelemetriaRed?.text = "📶 Wi-Fi e IP: No disponibles"
+        }
+
+        // ESTADO DE LA SIM Y DATOS MÓVILES
+        try {
+            val telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
+            val operadorName = telephonyManager?.networkOperatorName?.ifEmpty { "Desconocido" } ?: "No disponible"
+            val simState = when (telephonyManager?.simState) {
+                TelephonyManager.SIM_STATE_READY -> "Insertada y lista"
+                TelephonyManager.SIM_STATE_ABSENT -> "Ausente"
+                else -> "Bloqueada o no lista"
+            }
+            tvTelemetriaMovil?.text = "📱 Operador Móvil: $operadorName\n💳 Estado SIM: $simState"
+        } catch (e: Exception) {
+            tvTelemetriaMovil?.text = "📱 Operador Móvil: Información no accesible"
+        }
+
+        // MEMORIA RAM, VOLÚMENES Y ESTADO DE ADB (DEPURACIÓN USB)
+        try {
+            // Memoria RAM
+            val actManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            val memInfo = ActivityManager.MemoryInfo()
+            actManager.getMemoryInfo(memInfo)
+            val ramLibreMb = memInfo.availMem / (1024 * 1024)
+            val ramTotalMb = memInfo.totalMem / (1024 * 1024)
+
+            // Volúmenes de audio
+            val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            val volRing = audioManager.getStreamVolume(AudioManager.STREAM_RING)
+            val maxRing = audioManager.getStreamMaxVolume(AudioManager.STREAM_RING)
+            val volMusic = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+            val maxMusic = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+
+            // Estado de Depuración USB (ADB)
+            val adbEnabled = Settings.Global.getInt(contentResolver, Settings.Global.ADB_ENABLED, 0) == 1
+            val estadoAdb = if (adbEnabled) "🟢 Activado" else "🔴 Desactivado"
+
+            // Temperatura de hardware mediante la batería
+            val batteryStatus = registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
             val tempInt = batteryStatus?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) ?: 0
             val temperaturaC = tempInt / 10.0
-            val statusCarga = batteryStatus?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
-            val estaCargando = statusCarga == BatteryManager.BATTERY_STATUS_CHARGING || statusCarga == BatteryManager.BATTERY_STATUS_FULL
-            val iconoCarga = if (estaCargando) "⚡ (Cargando)" else "🔌 (Descargando)"
 
-            tvTelemetriaAlmacenamiento?.text = "💾 Alm. Libre: $gbDisponibles GB\n" +
-                    "📶 Wi-Fi: $ssid ($rssi dBm - $calDesc)\n" +
-                    "🔋 Batería: $batteryPct% $iconoCarga\n" +
-                    "🌡️ Temp. Hardware: $temperaturaC °C"
-
+            tvTelemetriaHardware?.text = "🧠 RAM Libre: $ramLibreMb MB / $ramTotalMb MB\n" +
+                    "🔊 Vol. Tono: $volRing/$maxRing | Música: $volMusic/$maxMusic\n" +
+                    "🌡️ Temperatura: $temperaturaC °C\n" +
+                    "🔌 Depuración USB (ADB): $estadoAdb"
         } catch (e: Exception) {
-            tvTelemetriaAlmacenamiento?.text = "💾 Almacenamiento y Sensores: No disponibles"
+            tvTelemetriaHardware?.text = "🧠 Parámetros de Hardware: No disponibles"
         }
 
         // Guardar ubicación
@@ -136,7 +199,7 @@ class ItActivity : AppCompatActivity() {
             }
         }
 
-        // Forzar Sincro con Excel real + 🏓 TEST PING DIAGNÓSTICO
+        // Forzar Sincro con Excel real + Test Ping
         btnTestSincro?.setOnClickListener {
             Toast.makeText(this, "🔄 Sincronizando datos y ejecutando test de red...", Toast.LENGTH_SHORT).show()
             AppLog.registrar("🔄 Forzada sincronización manual y test de red desde Panel IT")
@@ -193,7 +256,7 @@ class ItActivity : AppCompatActivity() {
             mostrarDialogoLogsEnPantalla()
         }
 
-        // Forzar OTA conectado al motor real de red
+        // Forzar OTA
         btnForzarOTA?.setOnClickListener {
             Toast.makeText(this, "🚀 Comprobando versión en GitHub...", Toast.LENGTH_SHORT).show()
             AppLog.registrar("🚀 Comprobación manual de OTA iniciada desde Panel IT")
@@ -224,7 +287,7 @@ class ItActivity : AppCompatActivity() {
                         val apkUrl = jsonObject.getString("apkUrl")
 
                         val pInfo = packageManager.getPackageInfo(packageName, 0)
-                        val versionActual = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                        val versionActual = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                             pInfo.longVersionCode.toInt()
                         } else {
                             @Suppress("DEPRECATION")
@@ -247,7 +310,7 @@ class ItActivity : AppCompatActivity() {
             })
         }
 
-        // 🧹 BOTÓN DE PURGA DE APKs RESIDUALES
+        // Purga de APKs
         btnPurgarApks?.setOnClickListener {
             purgarApksResiduales()
         }
@@ -267,13 +330,11 @@ class ItActivity : AppCompatActivity() {
         }
     }
 
-    // 🧹 LÓGICA DE PURGA DE ARCHIVOS RESIDUALES
     private fun purgarApksResiduales() {
         try {
             var bytesLiberados: Long = 0
             var archivosBorrados = 0
 
-            // 1. Revisar directorio de archivos externos de la app (Donde se descarga update.apk)
             val extDir = getExternalFilesDir(null)
             if (extDir != null && extDir.exists()) {
                 extDir.listFiles()?.forEach { archivo ->
@@ -287,7 +348,6 @@ class ItActivity : AppCompatActivity() {
                 }
             }
 
-            // 2. Revisar directorio interno de caché de la app
             val cacheDir = cacheDir
             if (cacheDir != null && cacheDir.exists()) {
                 cacheDir.listFiles()?.forEach { archivo ->
@@ -303,7 +363,6 @@ class ItActivity : AppCompatActivity() {
 
             val mbLiberados = String.format(Locale.US, "%.2f", bytesLiberados / (1024.0 * 1024.0))
             AppLog.registrar("🧹 Purga ejecutada: $archivosBorrados archivos APK eliminados ($mbLiberados MB liberados).")
-
             Toast.makeText(this, "🧹 Limpieza completada:\n$archivosBorrados archivo(s) eliminados ($mbLiberados MB libres)", Toast.LENGTH_LONG).show()
 
         } catch (e: Exception) {
@@ -393,7 +452,7 @@ class ItActivity : AppCompatActivity() {
                 val logsCompletos = AppLog.obtenerLogs()
                 val mensajeFinal = "LOGS KIOSCO:\n" + if (logsCompletos.length > 600) logsCompletos.takeLast(600) else logsCompletos
 
-                val smsManager = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                val smsManager = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     getSystemService(SmsManager::class.java) ?: @Suppress("DEPRECATION") SmsManager.getDefault()
                 } else {
                     @Suppress("DEPRECATION") SmsManager.getDefault()
