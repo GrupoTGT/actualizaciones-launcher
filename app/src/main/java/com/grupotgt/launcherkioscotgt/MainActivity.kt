@@ -19,6 +19,7 @@ import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Typeface
 import android.graphics.drawable.BitmapDrawable
+import android.graphics.drawable.GradientDrawable
 import android.hardware.Camera
 import android.media.AudioManager
 import android.net.ConnectivityManager
@@ -40,6 +41,9 @@ import android.view.KeyEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.View
+import android.view.WindowManager
+import android.view.animation.Animation
+import android.view.animation.ScaleAnimation
 import android.widget.*
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
@@ -276,7 +280,7 @@ class MainActivity : AppCompatActivity() {
                         if (numeroEntranteRaw == null) return
 
                         val numeroEntrante = numeroEntranteRaw
-                        var nombreCaller = "Centralita / Desconocido"
+                        var nombreCaller = "Desconocido"
 
                         val numLimpio = numeroEntrante.replace(" ", "").replace("+34", "").replace("-", "")
 
@@ -335,7 +339,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         try {
             AppLog.inicializar(this)
-            AppLog.info("MainActivity iniciada (Versión 27 - Escudo Anti-Bucle OTA)")
+            AppLog.info("MainActivity iniciada (Versión 29 - Capa Overlays Sistema)")
             Thread.setDefaultUncaughtExceptionHandler { _, throwable ->
                 val errorMsg = "CRASH: ${throwable.localizedMessage}"
                 AppLog.error(errorMsg)
@@ -352,9 +356,9 @@ class MainActivity : AppCompatActivity() {
             } else {
                 @Suppress("DEPRECATION")
                 window.addFlags(
-                    android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                            android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
-                            android.view.WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
+                    WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                            WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                            WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
                 )
             }
 
@@ -372,7 +376,6 @@ class MainActivity : AppCompatActivity() {
             cargarAgendaDesdeCache()
             descargarAgendaNube(modoSilencioso = true)
 
-            // LLAMADA INICIAL SEGURA EN ONCREATE (Eliminada de onResume)
             comprobarActualizacionOTA()
 
             configurarBotonSecreto()
@@ -583,8 +586,6 @@ class MainActivity : AppCompatActivity() {
                 prefs.edit().putString("hora_reinicio_seccion", horaReinicioEncontrada).apply()
             }
 
-            val correoFinalGuardado = prefs.getString("correo_it", "No configurado")
-            val telefonoFinalGuardado = prefs.getString("telefono_it", "No configurado")
             AppLog.info("Grupo: '$grupoFiltro' | Botones: ${nuevosBotones.size} | Lista Blanca: ${listaNumerosPermitidos.size} | Aviso: '$avisoEncontrado'")
 
             contactosGuardados = nuevosBotones.toList()
@@ -674,7 +675,6 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.tvUbicacionDispositivo)?.setOnLongClickListener {
             val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
             val ultimaSincro = prefs.getString("ultima_sincro", "Nunca")
-            val horaRein = prefs.getString("hora_reinicio_seccion", "No programado")
             Toast.makeText(this, "🔄 Sincro: $ultimaSincro\n🛡️ Num en Lista Blanca: ${whitelistGlobal.size}", Toast.LENGTH_LONG).show()
             true
         }
@@ -686,8 +686,7 @@ class MainActivity : AppCompatActivity() {
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
                 val telecomManager = getSystemService(Context.TELECOM_SERVICE) as TelecomManager
                 if (ContextCompat.checkSelfPermission(this, Manifest.permission.ANSWER_PHONE_CALLS) == PackageManager.PERMISSION_GRANTED) {
-                    val resultado = telecomManager.endCall()
-                    AppLog.info("Orden de colgado emitida por TelecomManager [Resultado: $resultado]")
+                    telecomManager.endCall()
                 }
             }
         } catch (e: Exception) {
@@ -702,7 +701,6 @@ class MainActivity : AppCompatActivity() {
                 val telecomManager = getSystemService(Context.TELECOM_SERVICE) as TelecomManager
                 if (ContextCompat.checkSelfPermission(this, Manifest.permission.ANSWER_PHONE_CALLS) == PackageManager.PERMISSION_GRANTED) {
                     telecomManager.acceptRingingCall()
-                    AppLog.success("Orden de aceptación de llamada emitida")
                 }
             }
         } catch (e: Exception) {
@@ -735,91 +733,171 @@ class MainActivity : AppCompatActivity() {
             try {
                 dialogLlamadaEntrante = Dialog(this@MainActivity, android.R.style.Theme_Black_NoTitleBar_Fullscreen).apply {
                     window?.let { win ->
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                            win.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
+                        } else {
+                            @Suppress("DEPRECATION")
+                            win.setType(WindowManager.LayoutParams.TYPE_PHONE)
+                        }
+
+                        win.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                                or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                                or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                                or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                                or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                                or View.SYSTEM_UI_FLAG_FULLSCREEN)
+
                         @Suppress("DEPRECATION")
                         win.addFlags(
-                            android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                                    android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
-                                    android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
-                                    android.view.WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
+                            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                                    WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
+                                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
                         )
                     }
 
-                    val layout = LinearLayout(context).apply {
+                    val rootLayout = LinearLayout(context).apply {
                         orientation = LinearLayout.VERTICAL
                         gravity = Gravity.CENTER
-                        setBackgroundColor(Color.parseColor("#111111"))
-                        setPadding(50, 50, 50, 50)
+                        background = GradientDrawable(
+                            GradientDrawable.Orientation.TOP_BOTTOM,
+                            intArrayOf(Color.parseColor("#0F172A"), Color.parseColor("#020617"))
+                        )
                     }
 
-                    val iconoTelefono = TextView(context).apply {
-                        text = "📞"
-                        textSize = 60f
+                    val cardLayout = LinearLayout(context).apply {
+                        orientation = LinearLayout.VERTICAL
                         gravity = Gravity.CENTER
-                        layoutParams = LinearLayout.LayoutParams(-2, -2).apply { setMargins(0, 0, 0, 20) }
+                        background = GradientDrawable().apply {
+                            setColor(Color.parseColor("#1E293B"))
+                            cornerRadius = 50f
+                            setStroke(2, Color.parseColor("#334155"))
+                        }
+                        setPadding(40, 80, 40, 80)
+
+                        layoutParams = LinearLayout.LayoutParams(
+                            (resources.displayMetrics.widthPixels * 0.90).toInt(),
+                            LinearLayout.LayoutParams.WRAP_CONTENT
+                        )
+                        elevation = 30f
                     }
 
-                    val textoTitulo = TextView(context).apply {
+                    val iconoPersona = TextView(context).apply {
+                        text = "👤"
+                        textSize = 80f
+                        gravity = Gravity.CENTER
+                        layoutParams = LinearLayout.LayoutParams(-2, -2).apply { setMargins(0, 0, 0, 30) }
+
+                        val pulseAnim = ScaleAnimation(
+                            0.95f, 1.05f, 0.95f, 1.05f,
+                            Animation.RELATIVE_TO_SELF, 0.5f,
+                            Animation.RELATIVE_TO_SELF, 0.5f
+                        ).apply {
+                            duration = 800
+                            repeatMode = Animation.REVERSE
+                            repeatCount = Animation.INFINITE
+                        }
+                        startAnimation(pulseAnim)
+                    }
+
+                    val tituloLlamada = TextView(context).apply {
                         text = "LLAMADA ENTRANTE"
-                        setTextColor(Color.parseColor("#FFC107"))
-                        textSize = 28f
+                        setTextColor(Color.parseColor("#00E5FF"))
+                        textSize = 16f
                         gravity = Gravity.CENTER
                         setTypeface(null, Typeface.BOLD)
+                        letterSpacing = 0.1f
                     }
 
-                    val textoSub = TextView(context).apply {
-                        text = if (nombreCaller != "Centralita / Desconocido") "Llamada de:\n$nombreCaller" else "Llamada entrante...\n$numeroCaller"
+                    val textoNombre = TextView(context).apply {
+                        text = nombreCaller
                         setTextColor(Color.WHITE)
+                        textSize = 42f
+                        gravity = Gravity.CENTER
+                        setTypeface(null, Typeface.BOLD)
+                        layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 20, 0, 5) }
+                    }
+
+                    val textoNumero = TextView(context).apply {
+                        text = numeroCaller
+                        setTextColor(Color.parseColor("#94A3B8"))
                         textSize = 22f
                         gravity = Gravity.CENTER
-                        layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 15, 0, 80) }
+                        layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, 80) }
                     }
 
-                    val btnContestar = Button(context).apply {
-                        text = "🟢 CONTESTAR"
-                        setBackgroundColor(Color.parseColor("#00C853"))
-                        setTextColor(Color.WHITE)
-                        textSize = 26f
-                        setTypeface(null, Typeface.BOLD)
-                        setPadding(50, 50, 50, 50)
-                        layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, 40) }
+                    val buttonLayout = LinearLayout(context).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.CENTER
+                        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
                     }
 
                     val btnRechazar = Button(context).apply {
-                        text = "🔴 RECHAZAR / COLGAR"
-                        setBackgroundColor(Color.parseColor("#C8102E"))
+                        text = "  COLGAR"
+                        background = GradientDrawable().apply {
+                            setColor(Color.parseColor("#E11D48"))
+                            cornerRadius = 100f
+                        }
                         setTextColor(Color.WHITE)
-                        textSize = 26f
+                        textSize = 20f
                         setTypeface(null, Typeface.BOLD)
-                        setPadding(50, 50, 50, 50)
-                        layoutParams = LinearLayout.LayoutParams(-1, -2)
+                        setPadding(0, 40, 0, 40)
+
+                        val p = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                            setMargins(20, 0, 20, 0)
+                        }
+                        layoutParams = p
+                    }
+
+                    val btnContestar = Button(context).apply {
+                        text = "  CONTESTAR"
+                        background = GradientDrawable().apply {
+                            setColor(Color.parseColor("#10B981"))
+                            cornerRadius = 100f
+                        }
+                        setTextColor(Color.WHITE)
+                        textSize = 20f
+                        setTypeface(null, Typeface.BOLD)
+                        setPadding(0, 40, 0, 40)
+
+                        val p = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                            setMargins(20, 0, 20, 0)
+                        }
+                        layoutParams = p
                     }
 
                     btnContestar.setOnClickListener {
-                        AppLog.success("Llamada contestada desde interfaz flotante")
+                        AppLog.success("Llamada contestada desde UI Pro")
                         contestarLlamadaReal()
                         dismiss()
                         mostrarPantallaLlamando(nombreCaller, numeroCaller)
                     }
 
                     btnRechazar.setOnClickListener {
-                        AppLog.warning("Llamada rechazada/colgada desde interfaz flotante")
+                        AppLog.warning("Llamada colgada desde UI Pro")
                         colgarLlamadaReal()
                         dismiss()
                         liberarPantalla()
                     }
 
-                    layout.addView(iconoTelefono)
-                    layout.addView(textoTitulo)
-                    layout.addView(textoSub)
-                    layout.addView(btnContestar)
-                    layout.addView(btnRechazar)
+                    buttonLayout.addView(btnRechazar)
+                    buttonLayout.addView(btnContestar)
 
-                    setContentView(layout)
+                    cardLayout.addView(iconoPersona)
+                    cardLayout.addView(tituloLlamada)
+                    cardLayout.addView(textoNombre)
+                    cardLayout.addView(textoNumero)
+                    cardLayout.addView(buttonLayout)
+
+                    rootLayout.addView(cardLayout)
+
+                    setContentView(rootLayout)
                     setCancelable(false)
                     show()
                 }
             } catch (e: Exception) {
-                AppLog.error("Error al mostrar pantalla de llamada entrante: ${e.message}")
+                AppLog.error("Error al mostrar UI de llamada entrante: ${e.message}")
             }
         }
     }
@@ -831,65 +909,123 @@ class MainActivity : AppCompatActivity() {
             try {
                 dialogLlamadaActiva = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen).apply {
                     window?.let { win ->
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                            win.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
+                        } else {
+                            @Suppress("DEPRECATION")
+                            win.setType(WindowManager.LayoutParams.TYPE_PHONE)
+                        }
+
+                        win.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                                or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                                or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                                or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                                or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                                or View.SYSTEM_UI_FLAG_FULLSCREEN)
+
                         @Suppress("DEPRECATION")
                         win.addFlags(
-                            android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                                    android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
-                                    android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+                            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
                         )
                     }
 
-                    val layout = LinearLayout(context).apply {
+                    val rootLayout = LinearLayout(context).apply {
                         orientation = LinearLayout.VERTICAL
                         gravity = Gravity.CENTER
-                        setBackgroundColor(Color.parseColor("#111111"))
-                        setPadding(50, 50, 50, 50)
+                        background = GradientDrawable(
+                            GradientDrawable.Orientation.TOP_BOTTOM,
+                            intArrayOf(Color.parseColor("#0F172A"), Color.parseColor("#020617"))
+                        )
                     }
 
-                    val textoLlamando = TextView(context).apply {
-                        text = if (numero.isNotEmpty() && nombre != "Centralita / Desconocido") "Llamada Activa:\n$nombre" else "Llamada Activa\n$numero"
-                        setTextColor(Color.WHITE)
-                        textSize = 28f
+                    val cardLayout = LinearLayout(context).apply {
+                        orientation = LinearLayout.VERTICAL
+                        gravity = Gravity.CENTER
+                        background = GradientDrawable().apply {
+                            setColor(Color.parseColor("#1E293B"))
+                            cornerRadius = 50f
+                            setStroke(2, Color.parseColor("#10B981"))
+                        }
+                        setPadding(40, 80, 40, 80)
+
+                        layoutParams = LinearLayout.LayoutParams(
+                            (resources.displayMetrics.widthPixels * 0.85).toInt(),
+                            LinearLayout.LayoutParams.WRAP_CONTENT
+                        )
+                        elevation = 30f
+                    }
+
+                    val tituloEstado = TextView(context).apply {
+                        text = "EN LLAMADA"
+                        setTextColor(Color.parseColor("#10B981"))
+                        textSize = 16f
                         gravity = Gravity.CENTER
                         setTypeface(null, Typeface.BOLD)
-                        layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, 100) }
+                        letterSpacing = 0.1f
+                    }
+
+                    val textoNombre = TextView(context).apply {
+                        text = nombre
+                        setTextColor(Color.WHITE)
+                        textSize = 38f
+                        gravity = Gravity.CENTER
+                        setTypeface(null, Typeface.BOLD)
+                        layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 20, 0, 5) }
+                    }
+
+                    val textoNumero = TextView(context).apply {
+                        text = numero
+                        setTextColor(Color.parseColor("#94A3B8"))
+                        textSize = 20f
+                        gravity = Gravity.CENTER
+                        layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, 80) }
                     }
 
                     val btnColgar = Button(context).apply {
-                        text = "☎ COLGAR LLAMADA"
-                        setBackgroundColor(Color.parseColor("#C8102E"))
+                        text = "FINALIZAR LLAMADA"
+                        background = GradientDrawable().apply {
+                            setColor(Color.parseColor("#E11D48"))
+                            cornerRadius = 100f
+                        }
                         setTextColor(Color.WHITE)
-                        textSize = 26f
+                        textSize = 22f
                         setTypeface(null, Typeface.BOLD)
-                        setPadding(50, 50, 50, 50)
-                        layoutParams = LinearLayout.LayoutParams(-1, -2)
+                        setPadding(0, 45, 0, 45)
+                        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
                     }
-
-                    layout.addView(textoLlamando)
-                    layout.addView(btnColgar)
 
                     if (numero.isNotEmpty()) {
                         try {
                             val intentCall = Intent(Intent.ACTION_CALL, Uri.parse("tel:$numero"))
                             context.startActivity(intentCall)
                         } catch (e: Exception) {
-                            AppLog.error("Error al lanzar la marcación saliente: ${e.message}")
+                            AppLog.error("Error marcando: ${e.message}")
                         }
                     }
 
                     btnColgar.setOnClickListener {
-                        AppLog.info("Colgado manual desde pantalla activa")
+                        AppLog.info("Colgado manual desde UI Activa Pro")
                         colgarLlamadaReal()
                         dismiss()
                         liberarPantalla()
                     }
 
-                    setContentView(layout)
+                    cardLayout.addView(tituloEstado)
+                    cardLayout.addView(textoNombre)
+                    cardLayout.addView(textoNumero)
+                    cardLayout.addView(btnColgar)
+
+                    rootLayout.addView(cardLayout)
+
+                    setContentView(rootLayout)
                     setCancelable(false)
                     show()
                 }
             } catch (e: Exception) {
-                AppLog.error("Error al mostrar pantalla de llamada activa: ${e.message}")
+                AppLog.error("Error al mostrar UI Activa: ${e.message}")
             }
         }
     }
@@ -960,7 +1096,6 @@ class MainActivity : AppCompatActivity() {
         handler.removeCallbacks(runnableReloj)
         try { unregisterReceiver(callStateReceiver) } catch (e: Exception) {}
 
-        // CIERRE SEGURO DE DIÁLOGOS PARA EVITAR CRASH POR WINDOW LEAKED
         try { dialogoOTA?.dismiss() } catch (e: Exception) {}
         liberarPantalla()
     }
@@ -1012,8 +1147,6 @@ class MainActivity : AppCompatActivity() {
         cargarIdentificacionYLogo()
         cargarAgendaDesdeCache()
         descargarAgendaNube(modoSilencioso = true)
-
-        // ¡IMPORTANTE! ELIMINADA LA ORDEN comprobarActualizacionOTA() DE AQUÍ PARA EVITAR EL BUCLE INFINITO
     }
 
     private fun cargarIdentificacionYLogo() {
@@ -1380,7 +1513,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun mostrarPantallaOTA() {
         runOnUiThread {
-            // SEGURIDAD: No intentar dibujar la pantalla si la app se está destruyendo (Window Leaked)
             if (isFinishing || isDestroyed) return@runOnUiThread
 
             if (dialogoOTA != null && dialogoOTA!!.isShowing) return@runOnUiThread
@@ -1389,17 +1521,17 @@ class MainActivity : AppCompatActivity() {
                 dialogoOTA = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen).apply {
                     window?.let { win ->
                         win.addFlags(
-                            android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                                    android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
-                                    android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+                            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
                         )
                     }
 
                     val rootLayout = LinearLayout(context).apply {
                         orientation = LinearLayout.VERTICAL
                         gravity = Gravity.CENTER
-                        background = android.graphics.drawable.GradientDrawable(
-                            android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,
+                        background = GradientDrawable(
+                            GradientDrawable.Orientation.TOP_BOTTOM,
                             intArrayOf(Color.parseColor("#0F172A"), Color.parseColor("#020617"))
                         )
                     }
@@ -1407,7 +1539,7 @@ class MainActivity : AppCompatActivity() {
                     val cardLayout = LinearLayout(context).apply {
                         orientation = LinearLayout.VERTICAL
                         gravity = Gravity.CENTER
-                        background = android.graphics.drawable.GradientDrawable().apply {
+                        background = GradientDrawable().apply {
                             setColor(Color.parseColor("#1E293B"))
                             cornerRadius = 40f
                             setStroke(3, Color.parseColor("#334155"))
@@ -1434,8 +1566,8 @@ class MainActivity : AppCompatActivity() {
                             0f, 0f, -15f, 15f
                         ).apply {
                             duration = 1500
-                            repeatMode = android.view.animation.Animation.REVERSE
-                            repeatCount = android.view.animation.Animation.INFINITE
+                            repeatMode = Animation.REVERSE
+                            repeatCount = Animation.INFINITE
                             interpolator = android.view.animation.AccelerateDecelerateInterpolator()
                         }
                         startAnimation(floatAnim)
@@ -1511,7 +1643,6 @@ class MainActivity : AppCompatActivity() {
         val ultimoIntento = prefs.getLong("ultimo_intento_ota", 0L)
         val ahora = System.currentTimeMillis()
 
-        // 🛡️ ESCUDO ANTI-BUCLE: Si intentó actualizar hace menos de 5 minutos, bloqueamos el proceso para evitar bucles ciegos.
         if (ahora - ultimoIntento < 5 * 60 * 1000L) {
             AppLog.warning("OTA Bloqueada temporalmente por el Escudo Anti-Bucle (Cooldown de 5 min).")
             return
@@ -1552,7 +1683,6 @@ class MainActivity : AppCompatActivity() {
                     AppLog.info("OTA Check -> Local: $versionActual | Nube: $versionNube")
 
                     if (versionNube > versionActual) {
-                        // Activamos la marca de tiempo para que el escudo Anti-Bucle empiece a contar
                         prefs.edit().putLong("ultimo_intento_ota", System.currentTimeMillis()).apply()
 
                         AppLog.ota("Versión nueva detectada en nube (v$versionNube). Descargando APK desde: $apkUrl")

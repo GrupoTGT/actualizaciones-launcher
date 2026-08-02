@@ -1,10 +1,14 @@
 package com.grupotgt.launcherkioscotgt
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
 import android.net.Uri
+import android.net.wifi.WifiManager
+import android.os.BatteryManager
 import android.os.Bundle
 import android.os.Environment
 import android.os.StatFs
@@ -25,6 +29,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import org.json.JSONObject
+import java.io.File
 import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -44,6 +49,7 @@ class ItActivity : AppCompatActivity() {
         val btnTestSincro = findViewById<Button>(R.id.btnTestSincro)
         val btnVerLogsIt = findViewById<Button>(R.id.btnVerLogsIt)
         val btnForzarOTA = findViewById<Button>(R.id.btnForzarOTA)
+        val btnPurgarApks = findViewById<Button>(R.id.btnPurgarApks) // 🧹 Botón de Purga APKs
         val btnAbrirAjustesAndroid = findViewById<Button>(R.id.btnAbrirAjustesAndroid)
         val btnCerrarPanelIT = findViewById<Button>(R.id.btnCerrarPanelIT)
         val tvEstadoKiosco = findViewById<TextView>(R.id.tvEstadoKiosco)
@@ -56,7 +62,6 @@ class ItActivity : AppCompatActivity() {
         val ubicacionActual = prefs.getString("ubicacion_dispositivo", "Seccion Finales linea 4")
         etUbicacion?.setText(ubicacionActual)
 
-        // CARGAR SECCIONES DESDE LA CACHÉ DEL CSV PARA EL DESPLEGABLE
         cargarSeccionesEnDesplegable(etUbicacion, prefs)
 
         // CARGAR VERSIÓN REAL DE LA APLICACIÓN
@@ -83,14 +88,40 @@ class ItActivity : AppCompatActivity() {
         val minutos = TimeUnit.MILLISECONDS.toMinutes(uptimeMillis) % 60
         tvTelemetriaUptime?.text = "⏱️ Tiempo activo: $dias días, $horas hrs, $minutos min"
 
-        // CALCULAR ALMACENAMIENTO LIBRE
+        // CALCULAR TELEMETRÍA AVANZADA: ALMACENAMIENTO, WI-FI, BATERÍA Y TEMPERATURA
         try {
             val stat = StatFs(Environment.getExternalStorageDirectory().path)
             val bytesDisponibles = stat.availableBlocksLong * stat.blockSizeLong
             val gbDisponibles = bytesDisponibles / (1024 * 1024 * 1024)
-            tvTelemetriaAlmacenamiento?.text = "💾 Almacenamiento Libre: $gbDisponibles GB"
+
+            val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+            val wifiInfo = wifiManager?.connectionInfo
+            val rssi = wifiInfo?.rssi ?: -99
+            val nivelWifi = WifiManager.calculateSignalLevel(rssi, 5)
+            val calidades = listOf("Muy baja", "Baja", "Buena", "Excelente", "Máxima")
+            val calDesc = if (nivelWifi in 0..4) calidades[nivelWifi] else "Desconocida"
+            val ssid = wifiInfo?.ssid?.replace("\"", "") ?: "Desconocida"
+
+            val batteryStatus = registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+            val batteryPct = batteryStatus?.let { intent ->
+                val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+                val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+                if (level >= 0 && scale > 0) (level * 100) / scale else -1
+            } ?: -1
+
+            val tempInt = batteryStatus?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) ?: 0
+            val temperaturaC = tempInt / 10.0
+            val statusCarga = batteryStatus?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+            val estaCargando = statusCarga == BatteryManager.BATTERY_STATUS_CHARGING || statusCarga == BatteryManager.BATTERY_STATUS_FULL
+            val iconoCarga = if (estaCargando) "⚡ (Cargando)" else "🔌 (Descargando)"
+
+            tvTelemetriaAlmacenamiento?.text = "💾 Alm. Libre: $gbDisponibles GB\n" +
+                    "📶 Wi-Fi: $ssid ($rssi dBm - $calDesc)\n" +
+                    "🔋 Batería: $batteryPct% $iconoCarga\n" +
+                    "🌡️ Temp. Hardware: $temperaturaC °C"
+
         } catch (e: Exception) {
-            tvTelemetriaAlmacenamiento?.text = "💾 Almacenamiento Libre: Desconocido"
+            tvTelemetriaAlmacenamiento?.text = "💾 Almacenamiento y Sensores: No disponibles"
         }
 
         // Guardar ubicación
@@ -105,10 +136,25 @@ class ItActivity : AppCompatActivity() {
             }
         }
 
-        // Forzar Sincro con Excel real
+        // Forzar Sincro con Excel real + 🏓 TEST PING DIAGNÓSTICO
         btnTestSincro?.setOnClickListener {
-            Toast.makeText(this, "🔄 Sincronizando datos y avisos con la nube...", Toast.LENGTH_SHORT).show()
-            AppLog.registrar("🔄 Forzada sincronización manual desde Panel IT")
+            Toast.makeText(this, "🔄 Sincronizando datos y ejecutando test de red...", Toast.LENGTH_SHORT).show()
+            AppLog.registrar("🔄 Forzada sincronización manual y test de red desde Panel IT")
+
+            val pingClient = OkHttpClient.Builder().connectTimeout(3, TimeUnit.SECONDS).build()
+            val pingRequest = Request.Builder().url("https://www.google.com").build()
+            val inicioMs = System.currentTimeMillis()
+
+            pingClient.newCall(pingRequest).enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    AppLog.registrar("🏓 Test Conectividad: ❌ Sin salida a internet (${e.message})")
+                }
+                override fun onResponse(call: Call, response: Response) {
+                    val latencia = System.currentTimeMillis() - inicioMs
+                    AppLog.registrar("🏓 Test Conectividad: ✅ OK (Latencia aproximada: ${latencia}ms)")
+                    response.close()
+                }
+            })
 
             val client = OkHttpClient()
             val request = Request.Builder().url(URL_GOOGLE_SHEETS_CSV).build()
@@ -130,10 +176,9 @@ class ItActivity : AppCompatActivity() {
                         val fechaActual = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault()).format(Date())
                         prefs.edit().putString("csv_cache_data", csvData).putString("ultima_sincro", fechaActual).apply()
 
-                        // Recargar el desplegable con los nuevos datos frescos de la nube
                         runOnUiThread {
                             cargarSeccionesEnDesplegable(etUbicacion, prefs)
-                            Toast.makeText(this@ItActivity, "✨ ¡Sincronizado y desplegable actualizado!", Toast.LENGTH_LONG).show()
+                            Toast.makeText(this@ItActivity, "✨ ¡Sincronizado y red probada con éxito!", Toast.LENGTH_LONG).show()
                         }
                         AppLog.registrar("✨ Sincronización manual completada y guardada en caché")
                     } catch (e: Exception) {
@@ -202,6 +247,11 @@ class ItActivity : AppCompatActivity() {
             })
         }
 
+        // 🧹 BOTÓN DE PURGA DE APKs RESIDUALES
+        btnPurgarApks?.setOnClickListener {
+            purgarApksResiduales()
+        }
+
         // Ajustes de Android
         btnAbrirAjustesAndroid?.setOnClickListener {
             try {
@@ -214,6 +264,51 @@ class ItActivity : AppCompatActivity() {
         // Cerrar panel
         btnCerrarPanelIT?.setOnClickListener {
             finish()
+        }
+    }
+
+    // 🧹 LÓGICA DE PURGA DE ARCHIVOS RESIDUALES
+    private fun purgarApksResiduales() {
+        try {
+            var bytesLiberados: Long = 0
+            var archivosBorrados = 0
+
+            // 1. Revisar directorio de archivos externos de la app (Donde se descarga update.apk)
+            val extDir = getExternalFilesDir(null)
+            if (extDir != null && extDir.exists()) {
+                extDir.listFiles()?.forEach { archivo ->
+                    if (archivo.isFile && (archivo.name.endsWith(".apk", true) || archivo.name.contains("update", true))) {
+                        val tam = archivo.length()
+                        if (archivo.delete()) {
+                            bytesLiberados += tam
+                            archivosBorrados++
+                        }
+                    }
+                }
+            }
+
+            // 2. Revisar directorio interno de caché de la app
+            val cacheDir = cacheDir
+            if (cacheDir != null && cacheDir.exists()) {
+                cacheDir.listFiles()?.forEach { archivo ->
+                    if (archivo.isFile && archivo.name.endsWith(".apk", true)) {
+                        val tam = archivo.length()
+                        if (archivo.delete()) {
+                            bytesLiberados += tam
+                            archivosBorrados++
+                        }
+                    }
+                }
+            }
+
+            val mbLiberados = String.format(Locale.US, "%.2f", bytesLiberados / (1024.0 * 1024.0))
+            AppLog.registrar("🧹 Purga ejecutada: $archivosBorrados archivos APK eliminados ($mbLiberados MB liberados).")
+
+            Toast.makeText(this, "🧹 Limpieza completada:\n$archivosBorrados archivo(s) eliminados ($mbLiberados MB libres)", Toast.LENGTH_LONG).show()
+
+        } catch (e: Exception) {
+            AppLog.registrar("❌ Error purgando APKs residuales: ${e.message}")
+            Toast.makeText(this, "❌ Error durante la purga: ${e.message}", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -239,7 +334,6 @@ class ItActivity : AppCompatActivity() {
                 val adapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, listaSecciones)
                 autoCompleteTextView?.setAdapter(adapter)
 
-                // Configurar para que al hacer clic se despliegue inmediatamente
                 autoCompleteTextView?.setOnClickListener {
                     autoCompleteTextView.showDropDown()
                 }
@@ -271,11 +365,18 @@ class ItActivity : AppCompatActivity() {
             .setTitle("📋 Registro de Errores y Actividad (Logs)")
             .setView(contenedorLogs)
             .setPositiveButton("Cerrar", null)
+            .setNeutralButton("📋 Copiar Logs") { _, _ ->
+                try {
+                    val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    val clip = ClipData.newPlainText("Logs Kiosco", AppLog.obtenerLogs())
+                    clipboard.setPrimaryClip(clip)
+                    Toast.makeText(this, "✅ ¡Logs copiados al portapapeles!", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Toast.makeText(this, "❌ Error al copiar: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
             .setNegativeButton("📤 Enviar por SMS") { _, _ ->
                 enviarLogsPorSms()
-            }
-            .setNeutralButton("📧 Enviar por Correo") { _, _ ->
-                enviarLogsPorCorreo()
             }
             .show()
     }
@@ -309,30 +410,5 @@ class ItActivity : AppCompatActivity() {
                 }
             }
         }.start()
-    }
-
-    private fun enviarLogsPorCorreo() {
-        try {
-            val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
-            val correoIT = prefs.getString("correo_it", "") ?: ""
-            if (correoIT.isEmpty()) {
-                Toast.makeText(this, "⚠️ No hay correo configurado en la columna 8 del Excel para esta sección", Toast.LENGTH_LONG).show()
-                return
-            }
-            val ubicacion = prefs.getString("ubicacion_dispositivo", "Ubicación Desconocida")
-            val logsCompletos = AppLog.obtenerLogs()
-
-            val intent = Intent(Intent.ACTION_SENDTO).apply {
-                data = Uri.parse("mailto:")
-                putExtra(Intent.EXTRA_EMAIL, arrayOf(correoIT))
-                putExtra(Intent.EXTRA_SUBJECT, "🚨 Diagnóstico y Logs Kiosco TGT - [$ubicacion]")
-                putExtra(Intent.EXTRA_TEXT, "Adjunto el registro de actividad y errores (Logs) del terminal:\n\n$logsCompletos")
-            }
-            startActivity(Intent.createChooser(intent, "Enviar logs por correo..."))
-            AppLog.registrar("📧 Cliente de correo abierto para enviar diagnóstico a: $correoIT")
-        } catch (e: Exception) {
-            AppLog.registrar("❌ Error abriendo cliente de correo: ${e.message}")
-            Toast.makeText(this, "❌ Error al abrir correo: ${e.message}", Toast.LENGTH_SHORT).show()
-        }
     }
 }

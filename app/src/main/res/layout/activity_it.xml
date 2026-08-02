@@ -160,6 +160,17 @@
                 android:textStyle="bold"
                 android:layout_marginBottom="10dp"/>
 
+            <!-- NUEVO BOTÓN DE PURGA DE APKs RESIDUALES -->
+            <Button
+                android:id="@+id/btnPurgarApks"
+                android:layout_width="match_parent"
+                android:layout_height="55dp"
+                android:text="🧹 PURGAR APKs RESIDUALES"
+                android:backgroundTint="#D97706"
+                android:textColor="#FFFFFF"
+                android:textStyle="bold"
+                android:layout_marginBottom="10dp"/>
+
             <Button
                 android:id="@+id/btnVerLogsIt"
                 android:layout_width="match_parent"
