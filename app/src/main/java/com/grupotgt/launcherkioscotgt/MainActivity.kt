@@ -272,19 +272,14 @@ class MainActivity : AppCompatActivity() {
                 val state = intent.getStringExtra(TelephonyManager.EXTRA_STATE)
                 when (state) {
                     TelephonyManager.EXTRA_STATE_RINGING -> {
-                        // 🛠️ SOLUCIÓN AL BUG DEL FIREWALL: Evitar el segundo broadcast nulo de Android
                         val numeroEntranteRaw = intent.getStringExtra(TelephonyManager.EXTRA_INCOMING_NUMBER)
-                        if (numeroEntranteRaw == null) {
-                            // Ignoramos el evento fantasma que causa el cuelgue accidental
-                            return
-                        }
+                        if (numeroEntranteRaw == null) return
 
                         val numeroEntrante = numeroEntranteRaw
                         var nombreCaller = "Centralita / Desconocido"
 
                         val numLimpio = numeroEntrante.replace(" ", "").replace("+34", "").replace("-", "")
 
-                        // 🛡️ FIREWALL DE LLAMADAS (Lista Blanca)
                         if (whitelistGlobal.isNotEmpty() || contactosGuardados.isNotEmpty()) {
                             val prefs = context?.getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
                             val itPhone = prefs?.getString("telefono_it", "")?.replace(" ", "")?.replace("+34", "") ?: ""
@@ -293,17 +288,14 @@ class MainActivity : AppCompatActivity() {
 
                             if (numLimpio.isNotEmpty()) {
                                 val enWhitelist = whitelistGlobal.any { it.contains(numLimpio) || numLimpio.contains(it) }
-
                                 val enBotones = contactosGuardados.any {
                                     val numAgenda = it.second.replace(" ", "").replace("+34", "").replace("-", "")
                                     numAgenda.isNotEmpty() && (numAgenda.contains(numLimpio) || numLimpio.contains(numAgenda))
                                 }
-
                                 val esIT = itPhone.isNotEmpty() && (itPhone.contains(numLimpio) || numLimpio.contains(itPhone))
 
                                 estaPermitido = enWhitelist || enBotones || esIT
                             } else {
-                                // Si no hay número (llamada oculta), lo bloqueamos por defecto
                                 estaPermitido = false
                             }
 
@@ -314,7 +306,6 @@ class MainActivity : AppCompatActivity() {
                             }
                         }
 
-                        // 📱 SI LA LLAMADA ESTÁ PERMITIDA:
                         if (numLimpio.isNotEmpty()) {
                             val contactoMatch = contactosGuardados.find {
                                 val numAgenda = it.second.replace(" ", "").replace("+34", "").replace("-", "")
@@ -344,7 +335,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         try {
             AppLog.inicializar(this)
-            AppLog.info("MainActivity iniciada (Versión 26 - Firewall Anti-Rebote)")
+            AppLog.info("MainActivity iniciada (Versión 27 - Escudo Anti-Bucle OTA)")
             Thread.setDefaultUncaughtExceptionHandler { _, throwable ->
                 val errorMsg = "CRASH: ${throwable.localizedMessage}"
                 AppLog.error(errorMsg)
@@ -381,6 +372,7 @@ class MainActivity : AppCompatActivity() {
             cargarAgendaDesdeCache()
             descargarAgendaNube(modoSilencioso = true)
 
+            // LLAMADA INICIAL SEGURA EN ONCREATE (Eliminada de onResume)
             comprobarActualizacionOTA()
 
             configurarBotonSecreto()
@@ -967,6 +959,9 @@ class MainActivity : AppCompatActivity() {
         handler.removeCallbacks(runnableAutoCheckOTA)
         handler.removeCallbacks(runnableReloj)
         try { unregisterReceiver(callStateReceiver) } catch (e: Exception) {}
+
+        // CIERRE SEGURO DE DIÁLOGOS PARA EVITAR CRASH POR WINDOW LEAKED
+        try { dialogoOTA?.dismiss() } catch (e: Exception) {}
         liberarPantalla()
     }
 
@@ -1017,7 +1012,8 @@ class MainActivity : AppCompatActivity() {
         cargarIdentificacionYLogo()
         cargarAgendaDesdeCache()
         descargarAgendaNube(modoSilencioso = true)
-        comprobarActualizacionOTA()
+
+        // ¡IMPORTANTE! ELIMINADA LA ORDEN comprobarActualizacionOTA() DE AQUÍ PARA EVITAR EL BUCLE INFINITO
     }
 
     private fun cargarIdentificacionYLogo() {
@@ -1384,68 +1380,124 @@ class MainActivity : AppCompatActivity() {
 
     private fun mostrarPantallaOTA() {
         runOnUiThread {
+            // SEGURIDAD: No intentar dibujar la pantalla si la app se está destruyendo (Window Leaked)
+            if (isFinishing || isDestroyed) return@runOnUiThread
+
             if (dialogoOTA != null && dialogoOTA!!.isShowing) return@runOnUiThread
 
-            dialogoOTA = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen).apply {
-                window?.let { win ->
-                    win.addFlags(
-                        android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                                android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
-                                android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
-                    )
+            try {
+                dialogoOTA = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen).apply {
+                    window?.let { win ->
+                        win.addFlags(
+                            android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                                    android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                                    android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+                        )
+                    }
+
+                    val rootLayout = LinearLayout(context).apply {
+                        orientation = LinearLayout.VERTICAL
+                        gravity = Gravity.CENTER
+                        background = android.graphics.drawable.GradientDrawable(
+                            android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,
+                            intArrayOf(Color.parseColor("#0F172A"), Color.parseColor("#020617"))
+                        )
+                    }
+
+                    val cardLayout = LinearLayout(context).apply {
+                        orientation = LinearLayout.VERTICAL
+                        gravity = Gravity.CENTER
+                        background = android.graphics.drawable.GradientDrawable().apply {
+                            setColor(Color.parseColor("#1E293B"))
+                            cornerRadius = 40f
+                            setStroke(3, Color.parseColor("#334155"))
+                        }
+                        setPadding(60, 80, 60, 80)
+
+                        val params = LinearLayout.LayoutParams(
+                            (resources.displayMetrics.widthPixels * 0.85).toInt(),
+                            LinearLayout.LayoutParams.WRAP_CONTENT
+                        ).apply {
+                            setMargins(40, 40, 40, 40)
+                        }
+                        layoutParams = params
+                        elevation = 25f
+                    }
+
+                    val icono = TextView(context).apply {
+                        text = "📦"
+                        textSize = 70f
+                        gravity = Gravity.CENTER
+                        layoutParams = LinearLayout.LayoutParams(-2, -2).apply { setMargins(0, 0, 0, 30) }
+
+                        val floatAnim = android.view.animation.TranslateAnimation(
+                            0f, 0f, -15f, 15f
+                        ).apply {
+                            duration = 1500
+                            repeatMode = android.view.animation.Animation.REVERSE
+                            repeatCount = android.view.animation.Animation.INFINITE
+                            interpolator = android.view.animation.AccelerateDecelerateInterpolator()
+                        }
+                        startAnimation(floatAnim)
+                    }
+
+                    val titulo = TextView(context).apply {
+                        text = "ACTUALIZACIÓN EN CURSO"
+                        setTextColor(Color.WHITE)
+                        textSize = 22f
+                        gravity = Gravity.CENTER
+                        setTypeface(null, Typeface.BOLD)
+                        letterSpacing = 0.05f
+                    }
+
+                    tvProgresoOta = TextView(context).apply {
+                        text = "Conectando con servidor seguro..."
+                        setTextColor(Color.parseColor("#94A3B8"))
+                        textSize = 16f
+                        gravity = Gravity.CENTER
+                        layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 20, 0, 50) }
+                    }
+
+                    pbProgresoOta = ProgressBar(context, null, android.R.attr.progressBarStyleHorizontal).apply {
+                        isIndeterminate = true
+                        max = 100
+                        progress = 0
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
+                            progressTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#00E5FF"))
+                        }
+                        scaleY = 1.5f
+                        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 30)
+                    }
+
+                    val textoAviso = TextView(context).apply {
+                        text = "⚠️ Por favor, no apague ni desconecte el equipo."
+                        setTextColor(Color.parseColor("#64748B"))
+                        textSize = 14f
+                        gravity = Gravity.CENTER
+                        layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 60, 0, 0) }
+                    }
+
+                    cardLayout.addView(icono)
+                    cardLayout.addView(titulo)
+                    cardLayout.addView(tvProgresoOta)
+                    cardLayout.addView(pbProgresoOta)
+
+                    rootLayout.addView(cardLayout)
+                    rootLayout.addView(textoAviso)
+
+                    setContentView(rootLayout)
+                    setCancelable(false)
+                    show()
                 }
-
-                val layout = LinearLayout(context).apply {
-                    orientation = LinearLayout.VERTICAL
-                    gravity = Gravity.CENTER
-                    setBackgroundColor(Color.parseColor("#111111"))
-                    setPadding(50, 50, 50, 50)
-                }
-
-                val icono = TextView(context).apply {
-                    text = "📦"
-                    textSize = 60f
-                    gravity = Gravity.CENTER
-                    layoutParams = LinearLayout.LayoutParams(-2, -2).apply { setMargins(0, 0, 0, 30) }
-                }
-
-                val titulo = TextView(context).apply {
-                    text = "ACTUALIZACIÓN DEL SISTEMA"
-                    setTextColor(Color.parseColor("#FFC107"))
-                    textSize = 28f
-                    gravity = Gravity.CENTER
-                    setTypeface(null, Typeface.BOLD)
-                }
-
-                tvProgresoOta = TextView(context).apply {
-                    text = "Conectando con servidor..."
-                    setTextColor(Color.WHITE)
-                    textSize = 18f
-                    gravity = Gravity.CENTER
-                    layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 20, 0, 40) }
-                }
-
-                pbProgresoOta = ProgressBar(context, null, android.R.attr.progressBarStyleHorizontal).apply {
-                    isIndeterminate = true
-                    max = 100
-                    progress = 0
-                    layoutParams = LinearLayout.LayoutParams(600, 40)
-                }
-
-                layout.addView(icono)
-                layout.addView(titulo)
-                layout.addView(tvProgresoOta)
-                layout.addView(pbProgresoOta)
-
-                setContentView(layout)
-                setCancelable(false)
-                show()
+            } catch (e: Exception) {
+                AppLog.error("Error al mostrar UI de OTA: ${e.message}")
             }
         }
     }
 
     private fun actualizarProgresoOTA(porcentaje: Int, texto: String, indeterminado: Boolean) {
         runOnUiThread {
+            if (isFinishing || isDestroyed) return@runOnUiThread
             tvProgresoOta?.text = texto
             pbProgresoOta?.isIndeterminate = indeterminado
             if (!indeterminado) {
@@ -1455,6 +1507,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun comprobarActualizacionOTA() {
+        val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
+        val ultimoIntento = prefs.getLong("ultimo_intento_ota", 0L)
+        val ahora = System.currentTimeMillis()
+
+        // 🛡️ ESCUDO ANTI-BUCLE: Si intentó actualizar hace menos de 5 minutos, bloqueamos el proceso para evitar bucles ciegos.
+        if (ahora - ultimoIntento < 5 * 60 * 1000L) {
+            AppLog.warning("OTA Bloqueada temporalmente por el Escudo Anti-Bucle (Cooldown de 5 min).")
+            return
+        }
+
         val client = OkHttpClient.Builder()
             .followRedirects(true)
             .followSslRedirects(true)
@@ -1490,6 +1552,9 @@ class MainActivity : AppCompatActivity() {
                     AppLog.info("OTA Check -> Local: $versionActual | Nube: $versionNube")
 
                     if (versionNube > versionActual) {
+                        // Activamos la marca de tiempo para que el escudo Anti-Bucle empiece a contar
+                        prefs.edit().putLong("ultimo_intento_ota", System.currentTimeMillis()).apply()
+
                         AppLog.ota("Versión nueva detectada en nube (v$versionNube). Descargando APK desde: $apkUrl")
                         descargarYInstalarAPK(apkUrl)
                     } else {
@@ -1515,7 +1580,7 @@ class MainActivity : AppCompatActivity() {
             override fun onFailure(call: Call, e: IOException) {
                 AppLog.error("Error de red descargando APK: ${e.message}")
                 actualizarProgresoOTA(0, "Error de red al descargar. Reintentando luego.", false)
-                handler.postDelayed({ runOnUiThread { dialogoOTA?.dismiss() } }, 4000)
+                handler.postDelayed({ runOnUiThread { try { dialogoOTA?.dismiss() } catch(e:Exception){} } }, 4000)
             }
 
             override fun onResponse(call: Call, response: Response) {
@@ -1523,7 +1588,7 @@ class MainActivity : AppCompatActivity() {
                     if (!response.isSuccessful) {
                         AppLog.error("Error HTTP descargando APK: Código ${response.code}")
                         actualizarProgresoOTA(0, "Error en el servidor de descargas.", false)
-                        handler.postDelayed({ runOnUiThread { dialogoOTA?.dismiss() } }, 4000)
+                        handler.postDelayed({ runOnUiThread { try { dialogoOTA?.dismiss() } catch(e:Exception){} } }, 4000)
                         return
                     }
 
@@ -1568,7 +1633,7 @@ class MainActivity : AppCompatActivity() {
                 } catch (e: Exception) {
                     AppLog.error("Excepción guardando archivo APK local: ${e.message}")
                     actualizarProgresoOTA(0, "Error al guardar el archivo.", false)
-                    handler.postDelayed({ runOnUiThread { dialogoOTA?.dismiss() } }, 4000)
+                    handler.postDelayed({ runOnUiThread { try { dialogoOTA?.dismiss() } catch(e:Exception){} } }, 4000)
                 }
             }
         })
@@ -1615,7 +1680,7 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             AppLog.error("Fallo crítico al invocar PackageInstaller: ${e.message}")
             actualizarProgresoOTA(0, "Fallo al iniciar la instalación.", false)
-            handler.postDelayed({ runOnUiThread { dialogoOTA?.dismiss() } }, 4000)
+            handler.postDelayed({ runOnUiThread { try { dialogoOTA?.dismiss() } catch(e:Exception){} } }, 4000)
         }
     }
 }
