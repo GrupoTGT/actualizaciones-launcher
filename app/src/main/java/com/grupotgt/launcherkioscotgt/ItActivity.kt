@@ -6,10 +6,14 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.net.Uri
 import android.os.Bundle
+import android.os.Environment
+import android.os.StatFs
+import android.os.SystemClock
 import android.provider.Settings
 import android.telephony.SmsManager
+import android.widget.ArrayAdapter
+import android.widget.AutoCompleteTextView
 import android.widget.Button
-import android.widget.EditText
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
@@ -25,6 +29,7 @@ import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 
 class ItActivity : AppCompatActivity() {
 
@@ -34,7 +39,7 @@ class ItActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_it)
 
-        val etUbicacion = findViewById<EditText>(R.id.etUbicacion)
+        val etUbicacion = findViewById<AutoCompleteTextView>(R.id.etUbicacion)
         val btnGuardar = findViewById<Button>(R.id.btnGuardarConfig)
         val btnTestSincro = findViewById<Button>(R.id.btnTestSincro)
         val btnVerLogsIt = findViewById<Button>(R.id.btnVerLogsIt)
@@ -44,9 +49,15 @@ class ItActivity : AppCompatActivity() {
         val tvEstadoKiosco = findViewById<TextView>(R.id.tvEstadoKiosco)
         val tvVersionApp = findViewById<TextView>(R.id.tvVersionApp)
 
+        val tvTelemetriaUptime = findViewById<TextView>(R.id.tvTelemetriaUptime)
+        val tvTelemetriaAlmacenamiento = findViewById<TextView>(R.id.tvTelemetriaAlmacenamiento)
+
         val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
         val ubicacionActual = prefs.getString("ubicacion_dispositivo", "Seccion Finales linea 4")
         etUbicacion?.setText(ubicacionActual)
+
+        // CARGAR SECCIONES DESDE LA CACHÉ DEL CSV PARA EL DESPLEGABLE
+        cargarSeccionesEnDesplegable(etUbicacion, prefs)
 
         // CARGAR VERSIÓN REAL DE LA APLICACIÓN
         try {
@@ -64,6 +75,23 @@ class ItActivity : AppCompatActivity() {
         }
 
         tvEstadoKiosco?.text = "📦 Paquete: $packageName\n🔒 Estado: Kiosco Blindado Activo"
+
+        // CALCULAR UPTIME (TIEMPO ENCENDIDO)
+        val uptimeMillis = SystemClock.elapsedRealtime()
+        val dias = TimeUnit.MILLISECONDS.toDays(uptimeMillis)
+        val horas = TimeUnit.MILLISECONDS.toHours(uptimeMillis) % 24
+        val minutos = TimeUnit.MILLISECONDS.toMinutes(uptimeMillis) % 60
+        tvTelemetriaUptime?.text = "⏱️ Tiempo activo: $dias días, $horas hrs, $minutos min"
+
+        // CALCULAR ALMACENAMIENTO LIBRE
+        try {
+            val stat = StatFs(Environment.getExternalStorageDirectory().path)
+            val bytesDisponibles = stat.availableBlocksLong * stat.blockSizeLong
+            val gbDisponibles = bytesDisponibles / (1024 * 1024 * 1024)
+            tvTelemetriaAlmacenamiento?.text = "💾 Almacenamiento Libre: $gbDisponibles GB"
+        } catch (e: Exception) {
+            tvTelemetriaAlmacenamiento?.text = "💾 Almacenamiento Libre: Desconocido"
+        }
 
         // Guardar ubicación
         btnGuardar?.setOnClickListener {
@@ -101,8 +129,13 @@ class ItActivity : AppCompatActivity() {
                     try {
                         val fechaActual = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault()).format(Date())
                         prefs.edit().putString("csv_cache_data", csvData).putString("ultima_sincro", fechaActual).apply()
+
+                        // Recargar el desplegable con los nuevos datos frescos de la nube
+                        runOnUiThread {
+                            cargarSeccionesEnDesplegable(etUbicacion, prefs)
+                            Toast.makeText(this@ItActivity, "✨ ¡Sincronizado y desplegable actualizado!", Toast.LENGTH_LONG).show()
+                        }
                         AppLog.registrar("✨ Sincronización manual completada y guardada en caché")
-                        runOnUiThread { Toast.makeText(this@ItActivity, "✨ ¡Sincronizado y avisos actualizados!", Toast.LENGTH_LONG).show() }
                     } catch (e: Exception) {
                         AppLog.registrar("❌ Excepción guardando caché manual: ${e.message}")
                     }
@@ -110,7 +143,7 @@ class ItActivity : AppCompatActivity() {
             })
         }
 
-        // Ver Logs en pantalla (Exclusivo desde Panel IT con botones de envío)
+        // Ver Logs en pantalla
         btnVerLogsIt?.setOnClickListener {
             mostrarDialogoLogsEnPantalla()
         }
@@ -181,6 +214,43 @@ class ItActivity : AppCompatActivity() {
         // Cerrar panel
         btnCerrarPanelIT?.setOnClickListener {
             finish()
+        }
+    }
+
+    private fun cargarSeccionesEnDesplegable(autoCompleteTextView: AutoCompleteTextView?, prefs: android.content.SharedPreferences) {
+        try {
+            val csvCache = prefs.getString("csv_cache_data", "") ?: ""
+            if (csvCache.isNotEmpty()) {
+                val lineas = csvCache.replace("\r", "").split("\n")
+                val seccionesSet = mutableSetOf<String>()
+
+                for (linea in lineas) {
+                    if (linea.isBlank()) continue
+                    val partes = if (linea.contains(";")) linea.split(";") else linea.split(",")
+                    if (partes.isNotEmpty()) {
+                        val seccion = partes[0].trim().replace("\"", "").replace("\uFEFF", "")
+                        if (seccion.isNotEmpty()) {
+                            seccionesSet.add(seccion)
+                        }
+                    }
+                }
+
+                val listaSecciones = seccionesSet.toList()
+                val adapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, listaSecciones)
+                autoCompleteTextView?.setAdapter(adapter)
+
+                // Configurar para que al hacer clic se despliegue inmediatamente
+                autoCompleteTextView?.setOnClickListener {
+                    autoCompleteTextView.showDropDown()
+                }
+                autoCompleteTextView?.setOnFocusChangeListener { _, hasFocus ->
+                    if (hasFocus) {
+                        autoCompleteTextView.showDropDown()
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            AppLog.registrar("❌ Error cargando secciones en desplegable: ${e.message}")
         }
     }
 
