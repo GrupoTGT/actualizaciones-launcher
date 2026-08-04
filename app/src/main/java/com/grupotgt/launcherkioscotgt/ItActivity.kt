@@ -1,10 +1,12 @@
 package com.grupotgt.launcherkioscotgt
 
+import android.Manifest
 import android.app.ActivityManager
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.media.AudioManager
@@ -14,19 +16,27 @@ import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.os.StatFs
 import android.os.SystemClock
 import android.provider.Settings
 import android.telephony.TelephonyManager
 import android.telephony.SmsManager
+import android.view.Gravity
 import android.widget.ArrayAdapter
 import android.widget.AutoCompleteTextView
 import android.widget.Button
+import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.OkHttpClient
@@ -35,7 +45,6 @@ import okhttp3.Response
 import org.json.JSONObject
 import java.io.File
 import java.io.IOException
-import java.net.InetAddress
 import java.net.NetworkInterface
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -119,7 +128,6 @@ class ItActivity : AppCompatActivity() {
             val calDesc = if (nivelWifi in 0..4) calidades[nivelWifi] else "Desconocida"
             val ssid = wifiInfo?.ssid?.replace("\"", "") ?: "Desconocida"
 
-            // Obtener IP Local actual
             var ipLocal = "No disponible"
             try {
                 val interfaces = NetworkInterface.getNetworkInterfaces()
@@ -135,7 +143,7 @@ class ItActivity : AppCompatActivity() {
                 }
             } catch (e: Exception) {}
 
-            tvTelemetriaRed?.text = "📶 Wi-Fi: $ssid ($rssi dBm - $calDesc)\n🌐 IP Local: $ipLocal"
+            tvTelemetriaRed?.text = "📶 Wi-Fi: $ssid ($rssi dBm - $calDesc)\n🌐 IP Local: $ipLocal\n👉 TOCA AQUÍ PARA ANALIZADOR WI-FI"
         } catch (e: Exception) {
             tvTelemetriaRed?.text = "📶 Wi-Fi e IP: No disponibles"
         }
@@ -154,27 +162,23 @@ class ItActivity : AppCompatActivity() {
             tvTelemetriaMovil?.text = "📱 Operador Móvil: Información no accesible"
         }
 
-        // MEMORIA RAM, VOLÚMENES Y ESTADO DE ADB (DEPURACIÓN USB)
+        // MEMORIA RAM, VOLÚMENES Y ESTADO DE ADB
         try {
-            // Memoria RAM
             val actManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
             val memInfo = ActivityManager.MemoryInfo()
             actManager.getMemoryInfo(memInfo)
             val ramLibreMb = memInfo.availMem / (1024 * 1024)
             val ramTotalMb = memInfo.totalMem / (1024 * 1024)
 
-            // Volúmenes de audio
             val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
             val volRing = audioManager.getStreamVolume(AudioManager.STREAM_RING)
             val maxRing = audioManager.getStreamMaxVolume(AudioManager.STREAM_RING)
             val volMusic = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
             val maxMusic = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
 
-            // Estado de Depuración USB (ADB)
             val adbEnabled = Settings.Global.getInt(contentResolver, Settings.Global.ADB_ENABLED, 0) == 1
             val estadoAdb = if (adbEnabled) "🟢 Activado" else "🔴 Desactivado"
 
-            // Temperatura de hardware mediante la batería
             val batteryStatus = registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
             val tempInt = batteryStatus?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) ?: 0
             val temperaturaC = tempInt / 10.0
@@ -185,6 +189,11 @@ class ItActivity : AppCompatActivity() {
                     "🔌 Depuración USB (ADB): $estadoAdb"
         } catch (e: Exception) {
             tvTelemetriaHardware?.text = "🧠 Parámetros de Hardware: No disponibles"
+        }
+
+        // --- ACCIÓN PARA ABRIR MINI-APP WI-FI ---
+        tvTelemetriaRed?.setOnClickListener {
+            solicitarPermisosYMostrarWifi()
         }
 
         // Guardar ubicación
@@ -284,7 +293,6 @@ class ItActivity : AppCompatActivity() {
 
                         val jsonObject = JSONObject(jsonStr)
                         val versionNube = jsonObject.getInt("versionCode")
-                        val apkUrl = jsonObject.getString("apkUrl")
 
                         val pInfo = packageManager.getPackageInfo(packageName, 0)
                         val versionActual = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -329,6 +337,135 @@ class ItActivity : AppCompatActivity() {
             finish()
         }
     }
+
+    // --- FUNCIONES DEL ANALIZADOR WI-FI ---
+
+    private fun solicitarPermisosYMostrarWifi() {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), 101)
+        } else {
+            mostrarAnalizadorWifi()
+        }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 101) {
+            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                mostrarAnalizadorWifi()
+            } else {
+                Toast.makeText(this, "⚠️ Permiso de ubicación denegado. No se podrán leer los detalles del Wi-Fi.", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun mostrarAnalizadorWifi() {
+        val dialogView = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(50, 50, 50, 50)
+            gravity = Gravity.CENTER
+            setBackgroundColor(Color.parseColor("#111111"))
+        }
+
+        val tvInfo = TextView(this).apply {
+            setTextColor(Color.WHITE)
+            textSize = 16f
+            gravity = Gravity.CENTER
+            setLineSpacing(0f, 1.2f)
+        }
+
+        val barraSenal = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 100
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 40).apply {
+                setMargins(0, 40, 0, 40)
+            }
+        }
+
+        val tvEstado = TextView(this).apply {
+            setTextColor(Color.YELLOW)
+            textSize = 14f
+            gravity = Gravity.CENTER
+            text = "Analizando espectro de red..."
+        }
+
+        dialogView.addView(tvInfo)
+        dialogView.addView(barraSenal)
+        dialogView.addView(tvEstado)
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("📡 Diagnóstico Wi-Fi Kiosco")
+            .setView(dialogView)
+            .setPositiveButton("Cerrar", null)
+            .create()
+
+        dialog.show()
+
+        val handler = Handler(Looper.getMainLooper())
+        val updateTask = object : Runnable {
+            override fun run() {
+                if (!dialog.isShowing) return
+
+                try {
+                    val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+                    val wifiInfo = wifiManager?.connectionInfo
+
+                    val rssi = wifiInfo?.rssi ?: -100
+                    val ssid = wifiInfo?.ssid?.replace("\"", "") ?: "Desconectado"
+                    val linkSpeed = wifiInfo?.linkSpeed ?: 0
+
+                    val quality = WifiManager.calculateSignalLevel(rssi, 100)
+
+                    val estado = when {
+                        rssi > -50 -> "Excelente (Ideal para OTA y Sincro)"
+                        rssi in -50 downTo -65 -> "Buena (Conexión estable)"
+                        rssi in -66 downTo -75 -> "Regular (Posibles cortes)"
+                        else -> "Pobre (¡Revisar cobertura / antenas!)"
+                    }
+
+                    var ipLocal = "127.0.0.1"
+                    try {
+                        val ip = wifiInfo?.ipAddress ?: 0
+                        ipLocal = String.format("%d.%d.%d.%d", (ip and 0xff), (ip shr 8 and 0xff), (ip shr 16 and 0xff), (ip shr 24 and 0xff))
+                    } catch (e: Exception) {}
+
+                    tvInfo.text = "📶 SSID: $ssid\n" +
+                            "🛜 Potencia (RSSI): $rssi dBm\n" +
+                            "⚡ Velocidad Enlace: $linkSpeed Mbps\n" +
+                            "🌐 IP Asignada: $ipLocal"
+
+                    barraSenal.progress = quality
+                    tvEstado.text = "Estado: $estado"
+
+                    if (quality > 70) {
+                        tvEstado.setTextColor(Color.parseColor("#00E676"))
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                            barraSenal.progressTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#00E676"))
+                        }
+                    } else if (quality > 40) {
+                        tvEstado.setTextColor(Color.parseColor("#FFCA28"))
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                            barraSenal.progressTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#FFCA28"))
+                        }
+                    } else {
+                        tvEstado.setTextColor(Color.parseColor("#FF5252"))
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                            barraSenal.progressTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#FF5252"))
+                        }
+                    }
+
+                } catch (e: Exception) {
+                    tvInfo.text = "Error al leer hardware Wi-Fi."
+                }
+
+                // Refrescar en tiempo real cada 1 segundo
+                handler.postDelayed(this, 1000)
+            }
+        }
+
+        handler.post(updateTask)
+    }
+
+    // --- RESTO DE TUS FUNCIONES ORIGINALES ---
 
     private fun purgarApksResiduales() {
         try {
@@ -424,20 +561,81 @@ class ItActivity : AppCompatActivity() {
             .setTitle("📋 Registro de Errores y Actividad (Logs)")
             .setView(contenedorLogs)
             .setPositiveButton("Cerrar", null)
-            .setNeutralButton("📋 Copiar Logs") { _, _ ->
+            .setNeutralButton("📋 Copiar") { _, _ ->
                 try {
                     val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     val clip = ClipData.newPlainText("Logs Kiosco", AppLog.obtenerLogs())
                     clipboard.setPrimaryClip(clip)
-                    Toast.makeText(this, "✅ ¡Logs copiados al portapapeles!", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this, "✅ ¡Logs copiados!", Toast.LENGTH_SHORT).show()
                 } catch (e: Exception) {
                     Toast.makeText(this, "❌ Error al copiar: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
             }
-            .setNegativeButton("📤 Enviar por SMS") { _, _ ->
+            .setNegativeButton("📤 SMS") { _, _ ->
                 enviarLogsPorSms()
             }
+            .setItems(arrayOf("📧 Enviar Logs por Email a IT")) { _, _ ->
+                enviarLogsPorEmail()
+            }
             .show()
+    }
+
+    private fun enviarLogsPorEmail() {
+        try {
+            val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
+            val csvCache = prefs.getString("csv_cache_data", "") ?: ""
+            val correosSet = mutableSetOf<String>()
+
+            if (csvCache.isNotEmpty()) {
+                val lineas = csvCache.replace("\r", "").split("\n")
+                for (linea in lineas) {
+                    if (linea.isBlank()) continue
+                    val partes = if (linea.contains(";")) linea.split(";") else linea.split(",")
+                    if (partes.size >= 8) {
+                        val correo = partes[7].trim().replace("\"", "")
+                        if (correo.isNotEmpty() && correo.contains("@")) {
+                            correosSet.add(correo)
+                        }
+                    }
+                }
+            }
+
+            val correoITUnico = prefs.getString("correo_it", "") ?: ""
+            if (correoITUnico.isNotEmpty() && correoITUnico.contains("@")) {
+                correosSet.add(correoITUnico)
+            }
+
+            val arrayCorreos = correosSet.toTypedArray()
+            if (arrayCorreos.isEmpty()) {
+                Toast.makeText(this, "❌ No hay ningún correo IT configurado en la Columna 8 del Google Sheets", Toast.LENGTH_LONG).show()
+                return
+            }
+
+            val archivoLog = File(filesDir, "kiosco_log_persistente.txt")
+            val uriLog: Uri = if (archivoLog.exists()) {
+                FileProvider.getUriForFile(this, "${packageName}.fileprovider", archivoLog)
+            } else {
+                Uri.EMPTY
+            }
+
+            val intentEmail = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_EMAIL, arrayCorreos)
+                putExtra(Intent.EXTRA_SUBJECT, "🚨 Reporte de Logs - Kiosco TGT (${prefs.getString("ubicacion_dispositivo", "Terminal")})")
+                putExtra(Intent.EXTRA_TEXT, "Adjunto encontrarás el archivo de registro de actividad y errores del terminal Kiosco.")
+                if (uriLog != Uri.EMPTY) {
+                    putExtra(Intent.EXTRA_STREAM, uriLog)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+            }
+
+            startActivity(Intent.createChooser(intentEmail, "Enviar Logs por Email a IT..."))
+            AppLog.registrar("📧 Diálogo de envío de logs por email abierto para: ${arrayCorreos.joinToString(", ")}")
+
+        } catch (e: Exception) {
+            AppLog.error("Error al preparar email de logs: ${e.message}")
+            Toast.makeText(this, "❌ Error al abrir cliente de correo: ${e.message}", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun enviarLogsPorSms() {

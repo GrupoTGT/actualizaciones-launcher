@@ -70,6 +70,7 @@
                 android:textColor="#B0BEC5"
                 android:layout_marginBottom="5dp"/>
 
+            <!-- 📶 CAMPO DE WI-FI E IP LOCAL -->
             <TextView
                 android:id="@+id/tvTelemetriaRed"
                 android:layout_width="match_parent"
@@ -78,7 +79,7 @@
                 android:textColor="#00E5FF"
                 android:layout_marginBottom="5dp"/>
 
-            <!-- 🆕 NUEVOS CAMPOS DE PARÁMETROS AVANZADOS -->
+            <!-- 📱 CAMPO DE OPERADOR Y DATOS MÓVILES -->
             <TextView
                 android:id="@+id/tvTelemetriaMovil"
                 android:layout_width="match_parent"
@@ -87,6 +88,7 @@
                 android:textColor="#4CAF50"
                 android:layout_marginBottom="5dp"/>
 
+            <!-- 🧠 CAMPO DE RAM, VOLÚMENES, ADB Y TEMPERATURA -->
             <TextView
                 android:id="@+id/tvTelemetriaHardware"
                 android:layout_width="match_parent"

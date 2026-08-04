@@ -190,11 +190,10 @@ class ApkInstallReceiver : BroadcastReceiver() {
                         if (numeroIT.isNotEmpty()) {
                             val mensajeError = "🚨 ALERTA KIOSCO [$ubicacion]: Fallo crítico al instalar la OTA. Android ha restaurado la versión anterior. Motivo: $msg"
 
-                            var smsManager: SmsManager? = null
-                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-                                smsManager = context.getSystemService(SmsManager::class.java)
+                            val smsManager: SmsManager? = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                                context.getSystemService(SmsManager::class.java)
                             } else {
-                                smsManager = SmsManager.getDefault()
+                                SmsManager.getDefault()
                             }
 
                             if (smsManager != null) {
@@ -222,16 +221,15 @@ class MainActivity : AppCompatActivity() {
     private lateinit var runnableConsola: Runnable
 
     private val intervaloSyncAgenda = 5 * 60 * 1000L
-    private val intervaloCheckOTA = 2 * 60 * 1000L // ⏱️ Reducido a 2 minutos para agilizar comprobaciones
+    private val intervaloCheckOTA = 2 * 60 * 1000L
 
     private var wakeLockLlamada: android.os.PowerManager.WakeLock? = null
 
     private var contactosGuardados = listOf<Pair<String, String>>()
     private var whitelistGlobal = listOf<String>()
 
-    // Variables para el Salvapantallas (Screensaver) Dinámico
     private var handlerInactividad = Handler(Looper.getMainLooper())
-    private var minutosInactividadConfig = 10 // Valor por defecto de seguridad
+    private var minutosInactividadConfig = 10
     private var dialogScreensaver: Dialog? = null
 
     private val runnableScreensaver = Runnable {
@@ -291,15 +289,14 @@ class MainActivity : AppCompatActivity() {
 
                         val numeroEntrante = numeroEntranteRaw
                         var nombreCaller = "Desconocido"
-
                         val numLimpio = numeroEntrante.replace(" ", "").replace("+34", "").replace("-", "")
 
+                        // FIREWALL DE LLAMADAS (LISTA BLANCA / WHITELIST)
                         if (whitelistGlobal.isNotEmpty() || contactosGuardados.isNotEmpty()) {
                             val prefs = context?.getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
                             val itPhone = prefs?.getString("telefono_it", "")?.replace(" ", "")?.replace("+34", "") ?: ""
 
                             var estaPermitido = false
-
                             if (numLimpio.isNotEmpty()) {
                                 val enWhitelist = whitelistGlobal.any { it.contains(numLimpio) || numLimpio.contains(it) }
                                 val enBotones = contactosGuardados.any {
@@ -309,12 +306,10 @@ class MainActivity : AppCompatActivity() {
                                 val esIT = itPhone.isNotEmpty() && (itPhone.contains(numLimpio) || numLimpio.contains(itPhone))
 
                                 estaPermitido = enWhitelist || enBotones || esIT
-                            } else {
-                                estaPermitido = false
                             }
 
-                            if (!estaPermitido) {
-                                AppLog.warning("🛡️ FIREWALL ACTIVO: Llamada bloqueada del número '${if(numeroEntrante.isEmpty()) "Oculto" else numeroEntrante}'.")
+                            if (whitelistGlobal.isNotEmpty() && !estaPermitido) {
+                                AppLog.warning("🛡️ FIREWALL TGT: Llamada bloqueada del número '$numeroEntrante' (Fuera de Lista Blanca).")
                                 colgarLlamadaReal()
                                 return
                             }
@@ -349,7 +344,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         try {
             AppLog.inicializar(this)
-            AppLog.info("MainActivity iniciada (Versión 31 - OTA Inmediata y Visible)")
+            AppLog.info("MainActivity iniciada (Versión 32 - Kiosco Production Industrial)")
             Thread.setDefaultUncaughtExceptionHandler { _, throwable ->
                 val errorMsg = "CRASH: ${throwable.localizedMessage}"
                 AppLog.error(errorMsg)
@@ -358,7 +353,6 @@ class MainActivity : AppCompatActivity() {
                 System.exit(1)
             }
 
-            // Recuperar configuración de inactividad guardada en caché local
             val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
             minutosInactividadConfig = prefs.getInt("minutos_inactividad_custom", 10)
 
@@ -372,6 +366,7 @@ class MainActivity : AppCompatActivity() {
                 window.addFlags(
                     WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
                             WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
                             WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
                 )
             }
@@ -405,7 +400,6 @@ class MainActivity : AppCompatActivity() {
             val filter = IntentFilter(TelephonyManager.ACTION_PHONE_STATE_CHANGED)
             registerReceiver(callStateReceiver, filter)
 
-            // Iniciar temporizador de inactividad al arrancar
             reiniciarTemporizadorInactividad()
 
         } catch (e: Exception) {
@@ -414,12 +408,11 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // --- GESTIÓN GLOBAL DE INACTIVIDAD (TOUCH LISTENER) ---
     override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
         reiniciarTemporizadorInactividad()
         if (dialogScreensaver != null && dialogScreensaver!!.isShowing) {
             dialogScreensaver?.dismiss()
-            return true // Intercepta el toque que despierta la pantalla
+            return true
         }
         return super.dispatchTouchEvent(ev)
     }
@@ -432,8 +425,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun mostrarScreensaverTGT() {
         if (dialogScreensaver != null && dialogScreensaver!!.isShowing) return
-
-        // Si hay una llamada en curso o entrante, posponer salvapantallas
         if (dialogLlamadaEntrante?.isShowing == true || dialogLlamadaActiva?.isShowing == true) {
             reiniciarTemporizadorInactividad()
             return
@@ -443,13 +434,6 @@ class MainActivity : AppCompatActivity() {
             try {
                 dialogScreensaver = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen).apply {
                     window?.let { win ->
-                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                            win.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
-                        } else {
-                            @Suppress("DEPRECATION")
-                            win.setType(WindowManager.LayoutParams.TYPE_PHONE)
-                        }
-
                         win.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
                                 or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
                                 or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
@@ -678,6 +662,7 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
 
+                    // COLUMNA 9 (Índice 8) -> Lista Blanca Global de Llamadas (Whitelist)
                     if (partes.size >= 9) {
                         val numeroPermitido = partes[8].trim().replace("\"", "").replace(" ", "").replace("+34", "").replace("-", "")
                         if (numeroPermitido.isNotEmpty()) {
@@ -685,7 +670,7 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
 
-                    // ⏱️ LECTURA DINÁMICA DE LA COLUMNA DE INACTIVIDAD (Columna 10 / Índice 9)
+                    // COLUMNA 10 (Índice 9) -> Minutos Inactividad Screensaver
                     if (partes.size >= 10) {
                         val minutosExcel = partes[9].trim().replace("\"", "").toIntOrNull()
                         if (minutosExcel != null && minutosExcel > 0) {
@@ -720,7 +705,7 @@ class MainActivity : AppCompatActivity() {
                 prefs.edit().putString("hora_reinicio_seccion", horaReinicioEncontrada).apply()
             }
 
-            AppLog.info("Grupo: '$grupoFiltro' | Botones: ${nuevosBotones.size} | Inactividad Config: ${minutosInactividadConfig}m")
+            AppLog.info("Grupo: '$grupoFiltro' | Botones: ${nuevosBotones.size} | Whitelist Col 9: ${listaNumerosPermitidos.size} núms")
 
             contactosGuardados = nuevosBotones.toList()
             whitelistGlobal = listaNumerosPermitidos.toList()
@@ -775,7 +760,7 @@ class MainActivity : AppCompatActivity() {
 
                     setOnClickListener {
                         if (numero.isNotEmpty()) {
-                            mostrarPantallaLlamando(nombre, numero)
+                            mostrarPantallaLlamando(nombre, numero, true)
                         } else {
                             Toast.makeText(this@MainActivity, "Número no válido", Toast.LENGTH_SHORT).show()
                         }
@@ -809,7 +794,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<TextView>(R.id.tvUbicacionDispositivo)?.setOnLongClickListener {
             val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
             val ultimaSincro = prefs.getString("ultima_sincro", "Nunca")
-            Toast.makeText(this, "🔄 Sincro: $ultimaSincro\n⏱️ Inactividad: ${minutosInactividadConfig} min", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "🔄 Sincro: $ultimaSincro\n⏱️ Inactividad: ${minutosInactividadConfig} min\n🛡️ Whitelist: ${whitelistGlobal.size} núms", Toast.LENGTH_LONG).show()
             true
         }
     }
@@ -859,6 +844,9 @@ class MainActivity : AppCompatActivity() {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
             }
             startActivity(intentBring)
+            Handler(Looper.getMainLooper()).postDelayed({ startActivity(intentBring) }, 800)
+            Handler(Looper.getMainLooper()).postDelayed({ startActivity(intentBring) }, 2000)
+
         } catch (e: Exception) {
             AppLog.error("Error forzando WakeLock: ${e.message}")
         }
@@ -867,13 +855,6 @@ class MainActivity : AppCompatActivity() {
             try {
                 dialogLlamadaEntrante = Dialog(this@MainActivity, android.R.style.Theme_Black_NoTitleBar_Fullscreen).apply {
                     window?.let { win ->
-                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                            win.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
-                        } else {
-                            @Suppress("DEPRECATION")
-                            win.setType(WindowManager.LayoutParams.TYPE_PHONE)
-                        }
-
                         win.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
                                 or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
                                 or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
@@ -1005,7 +986,7 @@ class MainActivity : AppCompatActivity() {
                         AppLog.success("Llamada contestada desde UI Pro")
                         contestarLlamadaReal()
                         dismiss()
-                        mostrarPantallaLlamando(nombreCaller, numeroCaller)
+                        mostrarPantallaLlamando(nombreCaller, numeroCaller, false)
                     }
 
                     btnRechazar.setOnClickListener {
@@ -1036,20 +1017,13 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun mostrarPantallaLlamando(nombre: String, numero: String) {
+    private fun mostrarPantallaLlamando(nombre: String, numero: String, esSaliente: Boolean = true) {
         if (dialogLlamadaActiva != null && dialogLlamadaActiva!!.isShowing) return
 
         runOnUiThread {
             try {
-                dialogLlamadaActiva = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen).apply {
+                dialogLlamadaActiva = Dialog(this@MainActivity, android.R.style.Theme_Black_NoTitleBar_Fullscreen).apply {
                     window?.let { win ->
-                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                            win.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
-                        } else {
-                            @Suppress("DEPRECATION")
-                            win.setType(WindowManager.LayoutParams.TYPE_PHONE)
-                        }
-
                         win.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
                                 or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
                                 or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
@@ -1131,15 +1105,6 @@ class MainActivity : AppCompatActivity() {
                         layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
                     }
 
-                    if (numero.isNotEmpty()) {
-                        try {
-                            val intentCall = Intent(Intent.ACTION_CALL, Uri.parse("tel:$numero"))
-                            context.startActivity(intentCall)
-                        } catch (e: Exception) {
-                            AppLog.error("Error marcando: ${e.message}")
-                        }
-                    }
-
                     btnColgar.setOnClickListener {
                         AppLog.info("Colgado manual desde UI Activa Pro")
                         colgarLlamadaReal()
@@ -1158,6 +1123,25 @@ class MainActivity : AppCompatActivity() {
                     setCancelable(false)
                     show()
                 }
+
+                if (esSaliente && numero.isNotEmpty()) {
+                    val numLimpio = numero.replace(" ", "")
+                    Handler(Looper.getMainLooper()).postDelayed({
+                        try {
+                            val intentCall = Intent(Intent.ACTION_CALL, Uri.parse("tel:$numLimpio"))
+                            this@MainActivity.startActivity(intentCall)
+
+                            val intentBring = Intent(this@MainActivity, MainActivity::class.java).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                            }
+                            Handler(Looper.getMainLooper()).postDelayed({ this@MainActivity.startActivity(intentBring) }, 500)
+                            Handler(Looper.getMainLooper()).postDelayed({ this@MainActivity.startActivity(intentBring) }, 1500)
+                        } catch (e: Exception) {
+                            AppLog.error("Error marcando: ${e.message}")
+                        }
+                    }, 300)
+                }
+
             } catch (e: Exception) {
                 AppLog.error("Error al mostrar UI Activa: ${e.message}")
             }
@@ -1188,7 +1172,6 @@ class MainActivity : AppCompatActivity() {
             val networks = cm.allNetworks
             for (network in networks) {
                 val capabilities = cm.getNetworkCapabilities(network) ?: continue
-
                 val tieneInternet = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
                         capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
 
@@ -1212,7 +1195,6 @@ class MainActivity : AppCompatActivity() {
             }
 
             tvWifi?.text = "$estadoWifi | $estadoDatos"
-
             if (wifiActivo || datosActivos) {
                 tvWifi?.setTextColor(Color.parseColor("#00C853"))
             } else {
@@ -1424,11 +1406,10 @@ class MainActivity : AppCompatActivity() {
                 if (numeroIT.isNullOrEmpty()) return@Thread
                 val mensajeFinal = "[$ubicacion] $mensajeBase"
 
-                var smsManager: SmsManager? = null
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-                    smsManager = getSystemService(SmsManager::class.java)
+                val smsManager: SmsManager? = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                    getSystemService(SmsManager::class.java)
                 } else {
-                    smsManager = SmsManager.getDefault()
+                    SmsManager.getDefault()
                 }
 
                 if (smsManager != null) {
@@ -1451,11 +1432,10 @@ class MainActivity : AppCompatActivity() {
             if (numeroIT.isNullOrEmpty()) return
             val mensajeFinal = "[$ubicacion] $mensajeBase"
 
-            var smsManager: SmsManager? = null
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-                smsManager = getSystemService(SmsManager::class.java)
+            val smsManager: SmsManager? = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                getSystemService(SmsManager::class.java)
             } else {
-                smsManager = SmsManager.getDefault()
+                SmsManager.getDefault()
             }
 
             smsManager?.sendTextMessage(numeroIT, null, mensajeFinal, null, null)
@@ -1464,7 +1444,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun mostrarDialogoPIN() {
         val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
-
         val tiempoDesbloqueo = prefs.getLong("tiempo_desbloqueo_pin", 0L)
         val tiempoActual = System.currentTimeMillis()
 
@@ -1490,7 +1469,6 @@ class MainActivity : AppCompatActivity() {
 
                 if (codigoMetido == "*###9999#" || codigoMetido == pinCorrecto) {
                     prefs.edit().putInt("intentos_fallidos_pin", 0).apply()
-
                     try { stopLockTask() } catch (e: Exception) {}
 
                     if (codigoMetido == "*###9999#") {
@@ -1653,19 +1631,11 @@ class MainActivity : AppCompatActivity() {
     private fun mostrarPantallaOTA() {
         runOnUiThread {
             if (isFinishing || isDestroyed) return@runOnUiThread
-
             if (dialogoOTA != null && dialogoOTA!!.isShowing) return@runOnUiThread
 
             try {
                 dialogoOTA = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen).apply {
                     window?.let { win ->
-                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                            win.setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
-                        } else {
-                            @Suppress("DEPRECATION")
-                            win.setType(WindowManager.LayoutParams.TYPE_PHONE)
-                        }
-
                         win.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
                                 or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
                                 or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
@@ -1795,8 +1765,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun comprobarActualizacionOTA() {
-        val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
-
         val client = OkHttpClient.Builder()
             .followRedirects(true)
             .followSslRedirects(true)
@@ -1821,12 +1789,10 @@ class MainActivity : AppCompatActivity() {
                     val apkUrl = jsonObject.getString("apkUrl")
 
                     val pInfo = packageManager.getPackageInfo(packageName, 0)
-
-                    var versionActual: Int = 0
-                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
-                        versionActual = pInfo.longVersionCode.toInt()
+                    val versionActual: Int = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                        pInfo.longVersionCode.toInt()
                     } else {
-                        versionActual = pInfo.versionCode
+                        pInfo.versionCode
                     }
 
                     AppLog.info("OTA Check -> Local: $versionActual | Nube: $versionNube")
@@ -1845,7 +1811,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun descargarYInstalarAPK(url: String) {
-        // Asegurar que la pantalla de descarga se lanza inmediatamente en el hilo principal
         mostrarPantallaOTA()
 
         val client = OkHttpClient.Builder()
@@ -1920,6 +1885,19 @@ class MainActivity : AppCompatActivity() {
     private fun instalarApkSilenciosa(apkFile: File) {
         try {
             val packageInstaller = packageManager.packageInstaller
+
+            // Limpieza preventiva de sesiones anteriores para evitar "Too many active sessions"
+            try {
+                val sessions = packageInstaller.mySessions
+                for (sessionInfo in sessions) {
+                    try {
+                        val openSession = packageInstaller.openSession(sessionInfo.sessionId)
+                        openSession.abandon()
+                        AppLog.ota("Sesión PackageInstaller anterior (${sessionInfo.sessionId}) abortada correctamente.")
+                    } catch (e: Exception) {}
+                }
+            } catch (e: Exception) {}
+
             val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
             params.setAppPackageName(packageName)
             val sessionId = packageInstaller.createSession(params)
