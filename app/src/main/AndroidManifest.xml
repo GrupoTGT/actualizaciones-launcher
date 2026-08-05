@@ -33,6 +33,8 @@
 
     <uses-permission android:name="android.permission.READ_CALL_LOG" />
 
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission" />
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -94,7 +96,6 @@
             </intent-filter>
         </receiver>
 
-        <!-- FileProvider obligatorio para adjuntar ficheros de log por correo -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

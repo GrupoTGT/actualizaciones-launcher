@@ -172,6 +172,16 @@ class ApkInstallReceiver : BroadcastReceiver() {
         val status = intent?.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
         val msg = intent?.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "Sin mensaje adicional"
 
+        /* // ⚠️ BLOQUE COMENTADO PARA EVITAR ERROR 'SESSION DESTROYED' / 'ENOENT' EN OTA
+        if (context != null) {
+            val apkFile = File(context.getExternalFilesDir(null), "update.apk")
+            if (apkFile.exists()) {
+                apkFile.delete()
+                AppLog.ota("Limpieza: Archivo APK de actualización eliminado.")
+            }
+        }
+        */
+
         when (status) {
             PackageInstaller.STATUS_SUCCESS -> {
                 AppLog.success("¡Actualización OTA aplicada con éxito!")
@@ -436,6 +446,10 @@ class MainActivity : AppCompatActivity() {
 
         runOnUiThread {
             try {
+                val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
+                val nombreSeccion = prefs.getString("ubicacion_dispositivo", "Sección No Asignada")?.uppercase(Locale.getDefault()) ?: "SECCIÓN NO ASIGNADA"
+                val logoUriString = prefs.getString("logo_uri_custom", "")
+
                 dialogScreensaver = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen).apply {
                     window?.let { win ->
                         win.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
@@ -457,45 +471,121 @@ class MainActivity : AppCompatActivity() {
 
                     val rootLayout = LinearLayout(context).apply {
                         orientation = LinearLayout.VERTICAL
-                        gravity = Gravity.CENTER
                         background = GradientDrawable(
                             GradientDrawable.Orientation.TOP_BOTTOM,
                             intArrayOf(Color.parseColor("#020617"), Color.parseColor("#0F172A"))
                         )
-                        setPadding(40, 40, 40, 40)
                     }
 
-                    // 🔄 USO DEL TEXTCLOCK NATIVO (Se actualiza solo sin depender del CPU)
+                    // 1. ZONA SUPERIOR: Logo y Sección
+                    val topLayout = LinearLayout(context).apply {
+                        orientation = LinearLayout.VERTICAL
+                        gravity = Gravity.CENTER or Gravity.TOP
+                        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
+                        setPadding(0, 120, 0, 0)
+                    }
+
+                    // Intentar cargar imagen, si falla poner texto
+                    if (!logoUriString.isNullOrEmpty()) {
+                        try {
+                            val ivLogo = ImageView(context).apply {
+                                setImageURI(Uri.parse(logoUriString))
+                                layoutParams = LinearLayout.LayoutParams(600, 250).apply { setMargins(0, 0, 0, 30) }
+                                scaleType = ImageView.ScaleType.FIT_CENTER
+                            }
+                            topLayout.addView(ivLogo)
+                        } catch (e: Exception) {
+                            val tvMarcaFallback = TextView(context).apply {
+                                text = "GRUPO TGT"
+                                setTextColor(Color.parseColor("#C8102E")) // Rojo corporativo
+                                textSize = 38f
+                                gravity = Gravity.CENTER
+                                setTypeface(null, Typeface.BOLD)
+                                letterSpacing = 0.2f
+                                layoutParams = LinearLayout.LayoutParams(-2, -2).apply { setMargins(0, 0, 0, 20) }
+                            }
+                            topLayout.addView(tvMarcaFallback)
+                        }
+                    } else {
+                        val tvMarcaTGT = TextView(context).apply {
+                            text = "GRUPO TGT"
+                            setTextColor(Color.parseColor("#C8102E")) // Rojo corporativo
+                            textSize = 38f
+                            gravity = Gravity.CENTER
+                            setTypeface(null, Typeface.BOLD)
+                            letterSpacing = 0.2f
+                            layoutParams = LinearLayout.LayoutParams(-2, -2).apply { setMargins(0, 0, 0, 20) }
+                        }
+                        topLayout.addView(tvMarcaTGT)
+                    }
+
+                    val tvSeccion = TextView(context).apply {
+                        text = nombreSeccion
+                        setTextColor(Color.parseColor("#F59E0B")) // Naranja corporativo
+                        textSize = 28f
+                        gravity = Gravity.CENTER
+                        setTypeface(null, Typeface.BOLD)
+                        letterSpacing = 0.1f
+                    }
+                    topLayout.addView(tvSeccion)
+
+                    // 2. ZONA CENTRAL: Hora Gigante
+                    val centerLayout = LinearLayout(context).apply {
+                        orientation = LinearLayout.VERTICAL
+                        gravity = Gravity.CENTER
+                        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                    }
+
                     val tvHoraGigante = TextClock(context).apply {
                         format24Hour = "HH:mm"
                         format12Hour = "HH:mm"
                         setTextColor(Color.WHITE)
-                        textSize = 85f
+                        textSize = 115f // Tamaño perfecto para una línea
                         gravity = Gravity.CENTER
                         setTypeface(null, Typeface.BOLD)
+                        setShadowLayer(30f, 0f, 0f, Color.parseColor("#00E5FF")) // Resplandor Neón Cian
                     }
+                    centerLayout.addView(tvHoraGigante)
 
-                    val tvMarcaTGT = TextView(context).apply {
-                        text = "GRUPO TGT • TERMINAL DE OPERACIONES"
-                        setTextColor(Color.parseColor("#00E5FF"))
-                        textSize = 16f
-                        gravity = Gravity.CENTER
-                        setTypeface(null, Typeface.BOLD)
-                        letterSpacing = 0.2f
-                        layoutParams = LinearLayout.LayoutParams(-2, -2).apply { setMargins(0, 20, 0, 60) }
+                    // 3. ZONA INFERIOR: Aviso y Firma
+                    val bottomLayout = LinearLayout(context).apply {
+                        orientation = LinearLayout.VERTICAL
+                        gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+                        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
+                        setPadding(0, 0, 0, 50)
                     }
 
                     val tvAvisoToque = TextView(context).apply {
-                        text = "Toca cualquier parte de la pantalla para volver"
+                        text = "Toca la pantalla para volver"
                         setTextColor(Color.parseColor("#64748B"))
-                        textSize = 14f
+                        textSize = 18f
                         gravity = Gravity.CENTER
-                        layoutParams = LinearLayout.LayoutParams(-2, -2).apply { setMargins(0, 40, 0, 0) }
+                        layoutParams = LinearLayout.LayoutParams(-2, -2).apply { setMargins(0, 0, 0, 40) }
+
+                        // Animación suave de respiración
+                        val alphaAnim = android.view.animation.AlphaAnimation(0.4f, 1.0f).apply {
+                            duration = 1500
+                            repeatMode = Animation.REVERSE
+                            repeatCount = Animation.INFINITE
+                        }
+                        startAnimation(alphaAnim)
                     }
 
-                    rootLayout.addView(tvHoraGigante)
-                    rootLayout.addView(tvMarcaTGT)
-                    rootLayout.addView(tvAvisoToque)
+                    val tvFirma = TextView(context).apply {
+                        text = "Creado por Marco Carpi."
+                        // Color casi negro para fusionarse con el fondo de la pantalla (Stealth mode)
+                        setTextColor(Color.parseColor("#1E293B"))
+                        textSize = 11f
+                        gravity = Gravity.CENTER
+                    }
+
+                    bottomLayout.addView(tvAvisoToque)
+                    bottomLayout.addView(tvFirma)
+
+                    // Ensamblar todo
+                    rootLayout.addView(topLayout)
+                    rootLayout.addView(centerLayout)
+                    rootLayout.addView(bottomLayout)
 
                     rootLayout.setOnClickListener {
                         dismiss()
@@ -639,6 +729,7 @@ class MainActivity : AppCompatActivity() {
 
             val nuevosBotones = mutableListOf<Pair<String, String>>()
             val listaNumerosPermitidos = mutableListOf<String>()
+            val listaAppsPermitidas = mutableListOf<String>()
 
             var avisoEncontrado = ""
             var horaReinicioEncontrada = ""
@@ -685,6 +776,7 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
 
+                    // Detección específica para ESTA SECCIÓN (Botones, Avisos y Aplicaciones)
                     if (grupoExcel.equals(grupoFiltro.trim(), ignoreCase = true)) {
                         if (partes.size >= 6) {
                             val textoAviso = partes[5].trim().replace("\"", "")
@@ -703,6 +795,15 @@ class MainActivity : AppCompatActivity() {
                         if (nombreExcel.isNotEmpty() && telefonoExcel.isNotEmpty()) {
                             nuevosBotones.add(Pair(nombreExcel, telefonoExcel))
                         }
+
+                        // COLUMNA 11 (Índice 10) -> Aplicaciones Extras Permitidas
+                        if (partes.size >= 11) {
+                            val appsExcel = partes[10].trim().replace("\"", "")
+                            if (appsExcel.isNotEmpty()) {
+                                val appsSeparadas = appsExcel.split(" ", ",").map { it.trim() }.filter { it.isNotEmpty() }
+                                listaAppsPermitidas.addAll(appsSeparadas)
+                            }
+                        }
                     }
                 }
             }
@@ -711,13 +812,17 @@ class MainActivity : AppCompatActivity() {
                 prefs.edit().putString("hora_reinicio_seccion", horaReinicioEncontrada).apply()
             }
 
-            AppLog.info("Grupo: '$grupoFiltro' | Botones: ${nuevosBotones.size} | Whitelist Col 9: ${listaNumerosPermitidos.size} núms")
+            val appsFinales = listaAppsPermitidas.distinct()
+            prefs.edit().putString("apps_permitidas", appsFinales.joinToString(",")).apply()
+
+            AppLog.info("Grupo: '$grupoFiltro' | Botones: ${nuevosBotones.size} | Apps: ${appsFinales.size} | Whitelist Col 9: ${listaNumerosPermitidos.size} núms")
 
             contactosGuardados = nuevosBotones.toList()
             whitelistGlobal = listaNumerosPermitidos.toList()
 
             runOnUiThread {
-                construirPanelDesdeNube(nuevosBotones)
+                configurarModoKioscoEstricto() // Refresca los permisos de bloqueo para autorizar las nuevas apps
+                construirPanelDesdeNube(nuevosBotones, appsFinales)
                 actualizarBannerUrgencia(avisoEncontrado)
             }
         } catch (e: Exception) {
@@ -741,12 +846,13 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) { e.printStackTrace() }
     }
 
-    private fun construirPanelDesdeNube(listaContactos: List<Pair<String, String>>) {
+    private fun construirPanelDesdeNube(listaContactos: List<Pair<String, String>>, listaApps: List<String>) {
         try {
             val panelBase = findViewById<LinearLayout>(R.id.panelBotonesDinamicos)
             panelBase?.removeAllViews()
             val listaBotonesUI = mutableListOf<Button>()
 
+            // 1. Crear botones rojos para los contactos telefónicos
             for (contacto in listaContactos) {
                 val nombre = contacto.first
                 val numero = contacto.second
@@ -775,6 +881,44 @@ class MainActivity : AppCompatActivity() {
                 listaBotonesUI.add(btn)
             }
 
+            // 2. Crear botones azules para las aplicaciones extra permitidas
+            val pm = packageManager
+            for (appPackage in listaApps) {
+                try {
+                    val appInfo = pm.getApplicationInfo(appPackage, 0)
+                    val appName = pm.getApplicationLabel(appInfo).toString()
+
+                    val btnApp = Button(this).apply {
+                        text = appName
+                        setTextColor(Color.WHITE)
+                        textSize = 16f
+                        typeface = Typeface.DEFAULT_BOLD
+                        // Azul corporativo para distinguirlas de las llamadas
+                        backgroundTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#2563EB"))
+                        elevation = 8f
+
+                        val p = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply {
+                            setMargins(8, 8, 8, 8)
+                        }
+                        layoutParams = p
+
+                        setOnClickListener {
+                            val launchIntent = pm.getLaunchIntentForPackage(appPackage)
+                            if (launchIntent != null) {
+                                AppLog.info("Lanzando aplicación externa permitida: $appName")
+                                startActivity(launchIntent)
+                            } else {
+                                Toast.makeText(this@MainActivity, "Esta app no se puede abrir directamente", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                    listaBotonesUI.add(btnApp)
+                } catch (e: PackageManager.NameNotFoundException) {
+                    AppLog.warning("La app $appPackage está en el Excel pero NO está instalada en este dispositivo.")
+                }
+            }
+
+            // 3. Pintar todos los botones en la cuadrícula (2 por fila)
             var filaActual: LinearLayout? = null
             for (index in listaBotonesUI.indices) {
                 if (index % 2 == 0) {
@@ -1230,7 +1374,17 @@ class MainActivity : AppCompatActivity() {
             val componentName = ComponentName(this, MyAdminReceiver::class.java)
 
             if (devicePolicyManager.isDeviceOwnerApp(packageName)) {
-                devicePolicyManager.setLockTaskPackages(componentName, arrayOf(packageName))
+                // Leer las apps extra permitidas desde la memoria y añadirlas al candado
+                val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
+                val appsStr = prefs.getString("apps_permitidas", "") ?: ""
+                val appsList = if (appsStr.isNotEmpty()) appsStr.split(",") else emptyList()
+
+                val paquetesAutorizados = mutableListOf(packageName) // El Launcher siempre debe estar autorizado
+                paquetesAutorizados.addAll(appsList)
+
+                // Enviar la orden de autorización masiva a Android
+                devicePolicyManager.setLockTaskPackages(componentName, paquetesAutorizados.toTypedArray())
+
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                     val permisosCriticos = arrayOf(
                         Manifest.permission.SEND_SMS, Manifest.permission.CAMERA,
