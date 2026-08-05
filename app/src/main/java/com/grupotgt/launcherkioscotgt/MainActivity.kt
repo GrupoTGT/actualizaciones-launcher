@@ -25,10 +25,15 @@ import android.media.AudioManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
+import android.net.wifi.WifiManager
 import android.os.BatteryManager
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.os.StatFs
+import android.os.SystemClock
 import android.os.Vibrator
 import android.provider.MediaStore
 import android.provider.Settings
@@ -56,11 +61,14 @@ import okhttp3.Callback
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
+import java.net.NetworkInterface
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -164,14 +172,6 @@ class ApkInstallReceiver : BroadcastReceiver() {
         val status = intent?.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
         val msg = intent?.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "Sin mensaje adicional"
 
-        if (context != null) {
-            val apkFile = File(context.getExternalFilesDir(null), "update.apk")
-            if (apkFile.exists()) {
-                apkFile.delete()
-                AppLog.ota("Limpieza: Archivo APK de actualización eliminado.")
-            }
-        }
-
         when (status) {
             PackageInstaller.STATUS_SUCCESS -> {
                 AppLog.success("¡Actualización OTA aplicada con éxito!")
@@ -190,7 +190,7 @@ class ApkInstallReceiver : BroadcastReceiver() {
                         if (numeroIT.isNotEmpty()) {
                             val mensajeError = "🚨 ALERTA KIOSCO [$ubicacion]: Fallo crítico al instalar la OTA. Android ha restaurado la versión anterior. Motivo: $msg"
 
-                            val smsManager: SmsManager? = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                            val smsManager: SmsManager? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                                 context.getSystemService(SmsManager::class.java)
                             } else {
                                 SmsManager.getDefault()
@@ -240,6 +240,7 @@ class MainActivity : AppCompatActivity() {
         override fun run() {
             AppLog.info("Sincronización automática periódica...")
             descargarAgendaNube(modoSilencioso = true)
+            enviarTelemetriaMDM() // Llama al envío de MDM en cada sincronización
             handler.postDelayed(this, intervaloSyncAgenda)
         }
     }
@@ -356,7 +357,7 @@ class MainActivity : AppCompatActivity() {
             val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
             minutosInactividadConfig = prefs.getInt("minutos_inactividad_custom", 10)
 
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O_MR1) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
                 setShowWhenLocked(true)
                 setTurnScreenOn(true)
                 val keyguardManager = getSystemService(Context.KEYGUARD_SERVICE) as android.app.KeyguardManager
@@ -401,6 +402,9 @@ class MainActivity : AppCompatActivity() {
             registerReceiver(callStateReceiver, filter)
 
             reiniciarTemporizadorInactividad()
+
+            // Forzar reporte MDM inicial al encender la tablet
+            enviarTelemetriaMDM()
 
         } catch (e: Exception) {
             AppLog.error("Error en onCreate: ${e.message}")
@@ -461,8 +465,10 @@ class MainActivity : AppCompatActivity() {
                         setPadding(40, 40, 40, 40)
                     }
 
-                    val tvHoraGigante = TextView(context).apply {
-                        text = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+                    // 🔄 USO DEL TEXTCLOCK NATIVO (Se actualiza solo sin depender del CPU)
+                    val tvHoraGigante = TextClock(context).apply {
+                        format24Hour = "HH:mm"
+                        format12Hour = "HH:mm"
                         setTextColor(Color.WHITE)
                         textSize = 85f
                         gravity = Gravity.CENTER
@@ -802,7 +808,7 @@ class MainActivity : AppCompatActivity() {
     @SuppressLint("MissingPermission")
     private fun colgarLlamadaReal() {
         try {
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 val telecomManager = getSystemService(Context.TELECOM_SERVICE) as TelecomManager
                 if (ContextCompat.checkSelfPermission(this, Manifest.permission.ANSWER_PHONE_CALLS) == PackageManager.PERMISSION_GRANTED) {
                     telecomManager.endCall()
@@ -816,7 +822,7 @@ class MainActivity : AppCompatActivity() {
     @SuppressLint("MissingPermission")
     private fun contestarLlamadaReal() {
         try {
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 val telecomManager = getSystemService(Context.TELECOM_SERVICE) as TelecomManager
                 if (ContextCompat.checkSelfPermission(this, Manifest.permission.ANSWER_PHONE_CALLS) == PackageManager.PERMISSION_GRANTED) {
                     telecomManager.acceptRingingCall()
@@ -1225,7 +1231,7 @@ class MainActivity : AppCompatActivity() {
 
             if (devicePolicyManager.isDeviceOwnerApp(packageName)) {
                 devicePolicyManager.setLockTaskPackages(componentName, arrayOf(packageName))
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                     val permisosCriticos = arrayOf(
                         Manifest.permission.SEND_SMS, Manifest.permission.CAMERA,
                         Manifest.permission.CALL_PHONE, Manifest.permission.READ_PHONE_STATE,
@@ -1337,7 +1343,7 @@ class MainActivity : AppCompatActivity() {
                 Manifest.permission.ANSWER_PHONE_CALLS, Manifest.permission.READ_PHONE_STATE,
                 Manifest.permission.READ_CALL_LOG
             )
-            if (android.os.Build.VERSION.SDK_INT <= android.os.Build.VERSION_CODES.P) {
+            if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
                 permisosRequeridos.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
             }
             val pedir = permisosRequeridos.filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }.toTypedArray()
@@ -1406,7 +1412,7 @@ class MainActivity : AppCompatActivity() {
                 if (numeroIT.isNullOrEmpty()) return@Thread
                 val mensajeFinal = "[$ubicacion] $mensajeBase"
 
-                val smsManager: SmsManager? = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                val smsManager: SmsManager? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                     getSystemService(SmsManager::class.java)
                 } else {
                     SmsManager.getDefault()
@@ -1432,7 +1438,7 @@ class MainActivity : AppCompatActivity() {
             if (numeroIT.isNullOrEmpty()) return
             val mensajeFinal = "[$ubicacion] $mensajeBase"
 
-            val smsManager: SmsManager? = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            val smsManager: SmsManager? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 getSystemService(SmsManager::class.java)
             } else {
                 SmsManager.getDefault()
@@ -1720,7 +1726,7 @@ class MainActivity : AppCompatActivity() {
                         isIndeterminate = true
                         max = 100
                         progress = 0
-                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                             progressTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#00E5FF"))
                         }
                         scaleY = 1.5f
@@ -1789,9 +1795,10 @@ class MainActivity : AppCompatActivity() {
                     val apkUrl = jsonObject.getString("apkUrl")
 
                     val pInfo = packageManager.getPackageInfo(packageName, 0)
-                    val versionActual: Int = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                    val versionActual: Int = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                         pInfo.longVersionCode.toInt()
                     } else {
+                        @Suppress("DEPRECATION")
                         pInfo.versionCode
                     }
 
@@ -1915,7 +1922,7 @@ class MainActivity : AppCompatActivity() {
             fis.close()
 
             var flagMutable = PendingIntent.FLAG_UPDATE_CURRENT
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 flagMutable = PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
             }
 
@@ -1938,5 +1945,129 @@ class MainActivity : AppCompatActivity() {
             actualizarProgresoOTA(0, "Fallo al iniciar la instalación.", false)
             handler.postDelayed({ runOnUiThread { try { dialogoOTA?.dismiss() } catch(e:Exception){} } }, 4000)
         }
+    }
+
+    // --- SISTEMA DE INVENTARIO Y TELEMETRÍA MDM TGT ---
+    private fun enviarTelemetriaMDM() {
+        Thread {
+            try {
+                // 1. Recopilar datos básicos
+                val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
+                val ubicacion = prefs.getString("ubicacion_dispositivo", "Desconocida") ?: "Desconocida"
+                val androidId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID) ?: "Desconocido"
+                val modelo = Build.MODEL ?: "Desconocido"
+
+                // Versión de la APP
+                val pInfo = packageManager.getPackageInfo(packageName, 0)
+                val versionApp = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) pInfo.longVersionCode.toString() else pInfo.versionCode.toString()
+
+                // Batería
+                val batteryStatus = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+                val level = batteryStatus?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+                val scale = batteryStatus?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+                val isCharging = batteryStatus?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) == BatteryManager.BATTERY_STATUS_CHARGING
+                val pctBateria = if (scale > 0) (level * 100) / scale else 0
+                val estadoBat = if (isCharging) "🔌 $pctBateria%" else "🔋 $pctBateria%"
+
+                // 🌟 NUEVO: Obtener MAC Real usando privilegios Device Owner (Bypass Android 11+)
+                var macReal = "02:00:00:00:00:00"
+                try {
+                    val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+                    val adminName = ComponentName(this@MainActivity, MyAdminReceiver::class.java)
+                    if (dpm.isDeviceOwnerApp(packageName)) {
+                        val macDpm = dpm.getWifiMacAddress(adminName)
+                        if (!macDpm.isNullOrEmpty()) {
+                            macReal = macDpm
+                        }
+                    }
+                } catch (e: Exception) {}
+
+                // Si por hardware no se ha podido sacar la MAC por DPM, intentamos el método clásico de red
+                if (macReal == "02:00:00:00:00:00") {
+                    try {
+                        val interfaces = NetworkInterface.getNetworkInterfaces()
+                        while (interfaces.hasMoreElements()) {
+                            val intf = interfaces.nextElement()
+                            if (intf.name.equals("wlan0", ignoreCase = true)) {
+                                val macBytes = intf.hardwareAddress
+                                if (macBytes != null) {
+                                    val res1 = StringBuilder()
+                                    for (b in macBytes) res1.append(String.format("%02X:", b))
+                                    if (res1.isNotEmpty()) res1.deleteCharAt(res1.length - 1)
+                                    macReal = res1.toString()
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {}
+                }
+
+                // IP Local
+                var ipLocal = "Desconectado"
+                try {
+                    val interfaces = NetworkInterface.getNetworkInterfaces()
+                    while (interfaces.hasMoreElements()) {
+                        val intf = interfaces.nextElement()
+                        val addrs = intf.inetAddresses
+                        while (addrs.hasMoreElements()) {
+                            val addr = addrs.nextElement()
+                            if (!addr.isLoopbackAddress && addr.hostAddress?.indexOf(':') == -1) {
+                                ipLocal = addr.hostAddress.toString()
+                            }
+                        }
+                    }
+                } catch (e: Exception) {}
+
+                // RSSI (Señal Wi-Fi)
+                val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+                val rssi = wifiManager?.connectionInfo?.rssi ?: 0
+
+                // Almacenamiento y Uptime
+                var espacioLibre = "Desconocido"
+                try {
+                    val stat = StatFs(Environment.getExternalStorageDirectory().path)
+                    val gbDisponibles = (stat.availableBlocksLong * stat.blockSizeLong) / (1024 * 1024 * 1024)
+                    espacioLibre = "$gbDisponibles GB"
+                } catch (e: Exception) {}
+
+                val uptimeMillis = SystemClock.elapsedRealtime()
+                val dias = java.util.concurrent.TimeUnit.MILLISECONDS.toDays(uptimeMillis)
+                val horas = java.util.concurrent.TimeUnit.MILLISECONDS.toHours(uptimeMillis) % 24
+                val uptimeFinal = "${dias}d ${horas}h"
+
+                // 2. Montar el paquete de datos JSON
+                val json = JSONObject()
+                json.put("fecha", SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault()).format(Date()))
+                json.put("ubicacion", ubicacion)
+                json.put("modelo", modelo)
+                json.put("mac", macReal)
+                json.put("androidId", androidId)
+                json.put("ip", ipLocal)
+                json.put("rssi", "$rssi dBm")
+                json.put("bateria", estadoBat)
+                json.put("version", "v$versionApp")
+                json.put("almacenamiento", espacioLibre)
+                json.put("uptime", uptimeFinal)
+
+                // 3. Enviar a Google Sheets usando OkHttp nuevo formato
+                val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
+                val body = json.toString().toRequestBody(mediaType)
+
+                val request = Request.Builder()
+                    // ⚠️ IMPORTANTE: PEGA AQUÍ TU URL DEL SCRIPT DE GOOGLE ⚠️
+                    .url("https://script.google.com/macros/s/AKfycbzs4U3PgP7gYTBGxFql0TyLY7fC6XQxzYLyPNOAn8nQlqQQFXAHIMQrXDyo5zwavg3etA/exec")
+                    .post(body)
+                    .build()
+
+                OkHttpClient().newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        AppLog.info("📡 Inventario MDM actualizado correctamente en la nube.")
+                    } else {
+                        AppLog.error("Error HTTP enviando MDM: ${response.code}")
+                    }
+                }
+            } catch (e: Exception) {
+                AppLog.error("Fallo al ejecutar telemetría MDM: ${e.message}")
+            }
+        }.start()
     }
 }
