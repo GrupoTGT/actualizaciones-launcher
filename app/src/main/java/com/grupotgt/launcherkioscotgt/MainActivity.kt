@@ -22,6 +22,7 @@ import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.GradientDrawable
 import android.hardware.Camera
 import android.media.AudioManager
+import android.media.RingtoneManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
@@ -37,6 +38,8 @@ import android.os.SystemClock
 import android.os.Vibrator
 import android.provider.MediaStore
 import android.provider.Settings
+import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.telecom.TelecomManager
 import android.telephony.SmsManager
 import android.telephony.TelephonyManager
@@ -172,16 +175,6 @@ class ApkInstallReceiver : BroadcastReceiver() {
         val status = intent?.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
         val msg = intent?.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "Sin mensaje adicional"
 
-        /* // ⚠️ BLOQUE COMENTADO PARA EVITAR ERROR 'SESSION DESTROYED' / 'ENOENT' EN OTA
-        if (context != null) {
-            val apkFile = File(context.getExternalFilesDir(null), "update.apk")
-            if (apkFile.exists()) {
-                apkFile.delete()
-                AppLog.ota("Limpieza: Archivo APK de actualización eliminado.")
-            }
-        }
-        */
-
         when (status) {
             PackageInstaller.STATUS_SUCCESS -> {
                 AppLog.success("¡Actualización OTA aplicada con éxito!")
@@ -242,6 +235,31 @@ class MainActivity : AppCompatActivity() {
     private var minutosInactividadConfig = 10
     private var dialogScreensaver: Dialog? = null
 
+    // TextToSpeech Motor
+    private lateinit var tts: TextToSpeech
+    private var isTtsReady = false
+    private var ttsPendienteGlobal = ""
+    private var ttsPendienteLocal = ""
+    private var volumenAntesDeTts: Int? = null
+
+    // Memoria MDM
+    private var mdmVolumenObjetivo: Int? = null
+    private var ultimoComandoEjecutado = ""
+    private var ultimoTimeoutEjecutado = ""
+    private var ultimoTTSLocal = ""
+    private var ultimoTTSGlobal = ""
+    private var ultimoReinicioEjecutado = ""
+
+    private var toquesSalida = 0
+    private var toquesBateria = 0
+    private var toquesWifi = 0
+    private var contadorVolumenAbajo = 0
+    private var contadorVolumenArriba = 0
+
+    private var dialogLlamadaActiva: Dialog? = null
+    private var dialogLlamadaEntrante: Dialog? = null
+    private var dialogBloqueoRobo: Dialog? = null
+
     private val runnableScreensaver = Runnable {
         mostrarScreensaverTGT()
     }
@@ -249,8 +267,10 @@ class MainActivity : AppCompatActivity() {
     private val runnableAutoSyncAgenda = object : Runnable {
         override fun run() {
             AppLog.info("Sincronización automática periódica...")
+            // La telemetría se envía DESPUÉS de recibir y aplicar la configuración de Sheets.
+            // Antes se enviaba aquí inmediatamente y competía con la descarga asíncrona,
+            // por lo que Inventario podía registrar el brillo/volumen ANTERIOR.
             descargarAgendaNube(modoSilencioso = true)
-            enviarTelemetriaMDM() // Llama al envío de MDM en cada sincronización
             handler.postDelayed(this, intervaloSyncAgenda)
         }
     }
@@ -270,17 +290,6 @@ class MainActivity : AppCompatActivity() {
             handler.postDelayed(this, 1000)
         }
     }
-
-    private var toquesSalida = 0
-    private var toquesBateria = 0
-    private var toquesWifi = 0
-    private var contadorVolumenAbajo = 0
-    private var contadorVolumenArriba = 0
-
-    private var dialogLlamadaActiva: Dialog? = null
-    private var dialogLlamadaEntrante: Dialog? = null
-
-    private var ultimoReinicioEjecutado = ""
 
     private val runnableEstadoDispositivo = object : Runnable {
         override fun run() {
@@ -302,7 +311,6 @@ class MainActivity : AppCompatActivity() {
                         var nombreCaller = "Desconocido"
                         val numLimpio = numeroEntrante.replace(" ", "").replace("+34", "").replace("-", "")
 
-                        // FIREWALL DE LLAMADAS (LISTA BLANCA / WHITELIST)
                         if (whitelistGlobal.isNotEmpty() || contactosGuardados.isNotEmpty()) {
                             val prefs = context?.getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
                             val itPhone = prefs?.getString("telefono_it", "")?.replace(" ", "")?.replace("+34", "") ?: ""
@@ -315,12 +323,11 @@ class MainActivity : AppCompatActivity() {
                                     numAgenda.isNotEmpty() && (numAgenda.contains(numLimpio) || numLimpio.contains(numAgenda))
                                 }
                                 val esIT = itPhone.isNotEmpty() && (itPhone.contains(numLimpio) || numLimpio.contains(itPhone))
-
                                 estaPermitido = enWhitelist || enBotones || esIT
                             }
 
                             if (whitelistGlobal.isNotEmpty() && !estaPermitido) {
-                                AppLog.warning("🛡️ FIREWALL TGT: Llamada bloqueada del número '$numeroEntrante' (Fuera de Lista Blanca).")
+                                AppLog.warning("🛡️ FIREWALL: Llamada bloqueada '$numeroEntrante'.")
                                 colgarLlamadaReal()
                                 return
                             }
@@ -331,11 +338,8 @@ class MainActivity : AppCompatActivity() {
                                 val numAgenda = it.second.replace(" ", "").replace("+34", "").replace("-", "")
                                 numAgenda.isNotEmpty() && (numAgenda.contains(numLimpio) || numLimpio.contains(numAgenda))
                             }
-                            if (contactoMatch != null) {
-                                nombreCaller = contactoMatch.first
-                            }
+                            if (contactoMatch != null) nombreCaller = contactoMatch.first
                         }
-
                         mostrarPantallaLlamadaEntrante(nombreCaller, numeroEntrante)
                     }
                     TelephonyManager.EXTRA_STATE_IDLE -> {
@@ -355,7 +359,7 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         try {
             AppLog.inicializar(this)
-            AppLog.info("MainActivity iniciada (Versión 32 - Kiosco Production Industrial)")
+            AppLog.info("MainActivity iniciada (Versión Definitiva MDM Hardware)")
             Thread.setDefaultUncaughtExceptionHandler { _, throwable ->
                 val errorMsg = "CRASH: ${throwable.localizedMessage}"
                 AppLog.error(errorMsg)
@@ -364,8 +368,32 @@ class MainActivity : AppCompatActivity() {
                 System.exit(1)
             }
 
+            tts = TextToSpeech(this) { status ->
+                if (status == TextToSpeech.SUCCESS) {
+                    val resultadoIdioma = tts.setLanguage(Locale("es", "ES"))
+                    if (resultadoIdioma == TextToSpeech.LANG_MISSING_DATA || resultadoIdioma == TextToSpeech.LANG_NOT_SUPPORTED) {
+                        isTtsReady = false
+                        AppLog.error("MDM TTS: español (es-ES) no disponible en el motor instalado. Resultado=$resultadoIdioma")
+                    } else {
+                        isTtsReady = true
+                        AppLog.success("MDM TTS: motor inicializado correctamente. Engine=${tts.defaultEngine}")
+                        configurarListenerTts()
+                        handler.post { reproducirTtsPendienteSiProcede() }
+                    }
+                } else {
+                    isTtsReady = false
+                    AppLog.error("MDM TTS: fallo de inicialización. status=$status")
+                }
+            }
+
             val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
             minutosInactividadConfig = prefs.getInt("minutos_inactividad_custom", 10)
+            val volumenPersistido = prefs.getInt("mdm_volumen_objetivo", -1)
+            mdmVolumenObjetivo = volumenPersistido.takeIf { it in 0..100 }
+            ultimoComandoEjecutado = prefs.getString("mdm_ultimo_comando", "") ?: ""
+            ultimoTimeoutEjecutado = prefs.getString("mdm_ultimo_timeout", "") ?: ""
+            ultimoTTSLocal = prefs.getString("mdm_ultimo_tts_local", "") ?: ""
+            ultimoTTSGlobal = prefs.getString("mdm_ultimo_tts_global", "") ?: ""
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
                 setShowWhenLocked(true)
@@ -384,18 +412,33 @@ class MainActivity : AppCompatActivity() {
 
             setContentView(R.layout.activity_main)
 
+            if (prefs.getBoolean("mdm_robo_activo", false)) {
+                handler.post { mostrarPantallaRobo() }
+            }
+
             onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
                 override fun handleOnBackPressed() {}
             })
 
             solicitarPermisos()
             solicitarAdministradorDispositivo()
-            forzarVolumenMaximo()
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+                // Un Device Owner (API 28+) usa DPM.setSystemSetting para brillo/timeout y no
+                // necesita sacar al kiosco a la pantalla especial de WRITE_SETTINGS.
+                val usaAjustesViaDeviceOwner = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && dpm.isDeviceOwnerApp(packageName)
+                if (!usaAjustesViaDeviceOwner && !Settings.System.canWrite(this)) {
+                    val intent = Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS)
+                    intent.data = Uri.parse("package:" + packageName)
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    try { startActivity(intent) } catch (e: Exception) {}
+                }
+            }
 
             cargarIdentificacionYLogo()
             cargarAgendaDesdeCache()
             descargarAgendaNube(modoSilencioso = true)
-
             comprobarActualizacionOTA()
 
             configurarBotonSecreto()
@@ -412,9 +455,8 @@ class MainActivity : AppCompatActivity() {
             registerReceiver(callStateReceiver, filter)
 
             reiniciarTemporizadorInactividad()
-
-            // Forzar reporte MDM inicial al encender la tablet
-            enviarTelemetriaMDM()
+            // La sincronización inicial ya enviará la telemetría una vez aplicada la configuración
+            // recibida de Google Sheets. Evitamos un heartbeat prematuro con valores antiguos.
 
         } catch (e: Exception) {
             AppLog.error("Error en onCreate: ${e.message}")
@@ -439,10 +481,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun mostrarScreensaverTGT() {
         if (dialogScreensaver != null && dialogScreensaver!!.isShowing) return
-        if (dialogLlamadaEntrante?.isShowing == true || dialogLlamadaActiva?.isShowing == true) {
-            reiniciarTemporizadorInactividad()
-            return
-        }
+        if (dialogLlamadaEntrante?.isShowing == true || dialogLlamadaActiva?.isShowing == true) return
 
         runOnUiThread {
             try {
@@ -452,32 +491,16 @@ class MainActivity : AppCompatActivity() {
 
                 dialogScreensaver = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen).apply {
                     window?.let { win ->
-                        win.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                                or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                                or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                                or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                                or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                                or View.SYSTEM_UI_FLAG_FULLSCREEN)
-
+                        win.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_STABLE or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_FULLSCREEN)
                         @Suppress("DEPRECATION")
-                        win.addFlags(
-                            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
-                                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
-                                    WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
-                                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
-                        )
+                        win.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
                     }
 
                     val rootLayout = LinearLayout(context).apply {
                         orientation = LinearLayout.VERTICAL
-                        background = GradientDrawable(
-                            GradientDrawable.Orientation.TOP_BOTTOM,
-                            intArrayOf(Color.parseColor("#020617"), Color.parseColor("#0F172A"))
-                        )
+                        background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(Color.parseColor("#020617"), Color.parseColor("#0F172A")))
                     }
 
-                    // 1. ZONA SUPERIOR: Logo y Sección
                     val topLayout = LinearLayout(context).apply {
                         orientation = LinearLayout.VERTICAL
                         gravity = Gravity.CENTER or Gravity.TOP
@@ -485,7 +508,6 @@ class MainActivity : AppCompatActivity() {
                         setPadding(0, 120, 0, 0)
                     }
 
-                    // Intentar cargar imagen, si falla poner texto
                     if (!logoUriString.isNullOrEmpty()) {
                         try {
                             val ivLogo = ImageView(context).apply {
@@ -496,119 +518,65 @@ class MainActivity : AppCompatActivity() {
                             topLayout.addView(ivLogo)
                         } catch (e: Exception) {
                             val tvMarcaFallback = TextView(context).apply {
-                                text = "GRUPO TGT"
-                                setTextColor(Color.parseColor("#C8102E")) // Rojo corporativo
-                                textSize = 38f
-                                gravity = Gravity.CENTER
-                                setTypeface(null, Typeface.BOLD)
-                                letterSpacing = 0.2f
+                                text = "GRUPO TGT"; setTextColor(Color.parseColor("#C8102E")); textSize = 38f; gravity = Gravity.CENTER; setTypeface(null, Typeface.BOLD); letterSpacing = 0.2f
                                 layoutParams = LinearLayout.LayoutParams(-2, -2).apply { setMargins(0, 0, 0, 20) }
                             }
                             topLayout.addView(tvMarcaFallback)
                         }
                     } else {
                         val tvMarcaTGT = TextView(context).apply {
-                            text = "GRUPO TGT"
-                            setTextColor(Color.parseColor("#C8102E")) // Rojo corporativo
-                            textSize = 38f
-                            gravity = Gravity.CENTER
-                            setTypeface(null, Typeface.BOLD)
-                            letterSpacing = 0.2f
+                            text = "GRUPO TGT"; setTextColor(Color.parseColor("#C8102E")); textSize = 38f; gravity = Gravity.CENTER; setTypeface(null, Typeface.BOLD); letterSpacing = 0.2f
                             layoutParams = LinearLayout.LayoutParams(-2, -2).apply { setMargins(0, 0, 0, 20) }
                         }
                         topLayout.addView(tvMarcaTGT)
                     }
 
                     val tvSeccion = TextView(context).apply {
-                        text = nombreSeccion
-                        setTextColor(Color.parseColor("#F59E0B")) // Naranja corporativo
-                        textSize = 28f
-                        gravity = Gravity.CENTER
-                        setTypeface(null, Typeface.BOLD)
-                        letterSpacing = 0.1f
+                        text = nombreSeccion; setTextColor(Color.parseColor("#F59E0B")); textSize = 28f; gravity = Gravity.CENTER; setTypeface(null, Typeface.BOLD); letterSpacing = 0.1f
                     }
                     topLayout.addView(tvSeccion)
 
-                    // 2. ZONA CENTRAL: Hora Gigante
                     val centerLayout = LinearLayout(context).apply {
-                        orientation = LinearLayout.VERTICAL
-                        gravity = Gravity.CENTER
-                        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+                        orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
                     }
 
                     val tvHoraGigante = TextClock(context).apply {
-                        format24Hour = "HH:mm"
-                        format12Hour = "HH:mm"
-                        setTextColor(Color.WHITE)
-                        textSize = 115f // Tamaño perfecto para una línea
-                        gravity = Gravity.CENTER
-                        setTypeface(null, Typeface.BOLD)
-                        setShadowLayer(30f, 0f, 0f, Color.parseColor("#00E5FF")) // Resplandor Neón Cian
+                        format24Hour = "HH:mm"; format12Hour = "HH:mm"; setTextColor(Color.WHITE); textSize = 115f; gravity = Gravity.CENTER; setTypeface(null, Typeface.BOLD); setShadowLayer(30f, 0f, 0f, Color.parseColor("#00E5FF"))
                     }
                     centerLayout.addView(tvHoraGigante)
 
-                    // 3. ZONA INFERIOR: Aviso y Firma
                     val bottomLayout = LinearLayout(context).apply {
-                        orientation = LinearLayout.VERTICAL
-                        gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-                        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
-                        setPadding(0, 0, 0, 50)
+                        orientation = LinearLayout.VERTICAL; gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL; layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f); setPadding(0, 0, 0, 50)
                     }
 
                     val tvAvisoToque = TextView(context).apply {
-                        text = "Toca la pantalla para volver"
-                        setTextColor(Color.parseColor("#64748B"))
-                        textSize = 18f
-                        gravity = Gravity.CENTER
-                        layoutParams = LinearLayout.LayoutParams(-2, -2).apply { setMargins(0, 0, 0, 40) }
-
-                        // Animación suave de respiración
-                        val alphaAnim = android.view.animation.AlphaAnimation(0.4f, 1.0f).apply {
-                            duration = 1500
-                            repeatMode = Animation.REVERSE
-                            repeatCount = Animation.INFINITE
-                        }
+                        text = "Toca la pantalla para volver"; setTextColor(Color.parseColor("#64748B")); textSize = 18f; gravity = Gravity.CENTER; layoutParams = LinearLayout.LayoutParams(-2, -2).apply { setMargins(0, 0, 0, 40) }
+                        val alphaAnim = android.view.animation.AlphaAnimation(0.4f, 1.0f).apply { duration = 1500; repeatMode = Animation.REVERSE; repeatCount = Animation.INFINITE }
                         startAnimation(alphaAnim)
                     }
 
-                    val tvFirma = TextView(context).apply {
-                        text = "Creado por Marco Carpi."
-                        // Color casi negro para fusionarse con el fondo de la pantalla (Stealth mode)
-                        setTextColor(Color.parseColor("#1E293B"))
-                        textSize = 11f
-                        gravity = Gravity.CENTER
-                    }
+                    val tvFirma = TextView(context).apply { text = "Creado por Marco Carpi."; setTextColor(Color.parseColor("#1E293B")); textSize = 11f; gravity = Gravity.CENTER }
 
                     bottomLayout.addView(tvAvisoToque)
                     bottomLayout.addView(tvFirma)
 
-                    // Ensamblar todo
                     rootLayout.addView(topLayout)
                     rootLayout.addView(centerLayout)
                     rootLayout.addView(bottomLayout)
 
-                    rootLayout.setOnClickListener {
-                        dismiss()
-                        reiniciarTemporizadorInactividad()
-                    }
+                    rootLayout.setOnClickListener { dismiss(); reiniciarTemporizadorInactividad() }
 
                     setContentView(rootLayout)
                     setCancelable(false)
                     show()
                 }
-            } catch (e: Exception) {
-                AppLog.error("Error al mostrar Screensaver: ${e.message}")
-            }
+            } catch (e: Exception) {}
         }
     }
 
     private fun liberarPantalla() {
         try {
-            wakeLockLlamada?.let {
-                if (it.isHeld) {
-                    it.release()
-                }
-            }
+            wakeLockLlamada?.let { if (it.isHeld) it.release() }
         } catch (e: Exception) { e.printStackTrace() }
     }
 
@@ -641,16 +609,14 @@ class MainActivity : AppCompatActivity() {
                 if (horaActualMinuto == horaProgramada && ultimoReinicioEjecutado != identificadorReinicio) {
                     ultimoReinicioEjecutado = identificadorReinicio
                     AppLog.info("Hora de reinicio automático alcanzada ($horaProgramada)! Ejecutando orden...")
-                    enviarAlertaITCRasante("🔄 Reinicio automático programado a las $horaProgramada en curso.")
+                    enviarAlertaITCRasante("🔄 Reinicio programado a las $horaProgramada en curso.")
 
                     val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
                     val adminName = ComponentName(this, MyAdminReceiver::class.java)
 
                     if (dpm.isDeviceOwnerApp(packageName)) {
-                        AppLog.success("Privilegios Device Owner correctos. Reiniciando terminal...")
                         dpm.reboot(adminName)
                     } else {
-                        AppLog.error("ERROR: La aplicación NO tiene permisos de Device Owner para reiniciar. Intentando fallback...")
                         Runtime.getRuntime().exec("reboot")
                     }
                 }
@@ -680,7 +646,7 @@ class MainActivity : AppCompatActivity() {
             val csvCache = prefs.getString("csv_cache_data", "") ?: ""
             if (csvCache.isNotEmpty()) {
                 AppLog.info("Agenda cargada desde Caché Local")
-                procesarYConstruirCSV(csvCache)
+                procesarYConstruirCSV(csvCache, ejecutarAccionesRemotas = false)
                 actualizarTextoUltimaSincro()
             }
         } catch (e: Exception) {
@@ -690,11 +656,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun descargarAgendaNube(modoSilencioso: Boolean) {
         val client = OkHttpClient()
-        val request = Request.Builder().url(URL_GOOGLE_SHEETS_CSV).build()
+        val urlCsvSinCache = "$URL_GOOGLE_SHEETS_CSV&t=${System.currentTimeMillis()}"
+        val request = Request.Builder().url(urlCsvSinCache).build()
 
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
                 AppLog.error("Error red CSV: ${e.message}")
+                // Aunque falle la descarga de configuración, el terminal debe seguir reportando
+                // su estado al Inventario. La caché local sigue siendo la configuración válida.
+                enviarTelemetriaMDM()
                 if (!modoSilencioso) {
                     runOnUiThread { Toast.makeText(this@MainActivity, "❌ Error de red al sincronizar", Toast.LENGTH_SHORT).show() }
                 }
@@ -702,7 +672,11 @@ class MainActivity : AppCompatActivity() {
 
             override fun onResponse(call: Call, response: Response) {
                 val csvData = response.body?.string()
-                if (!response.isSuccessful || csvData.isNullOrEmpty()) return
+                if (!response.isSuccessful || csvData.isNullOrEmpty()) {
+                    AppLog.error("CSV inválido/no disponible. HTTP=${response.code} vacío=${csvData.isNullOrEmpty()}")
+                    enviarTelemetriaMDM()
+                    return
+                }
                 try {
                     val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
                     val fechaActual = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault()).format(Date())
@@ -710,8 +684,13 @@ class MainActivity : AppCompatActivity() {
                 } catch (e: Exception) {}
 
                 runOnUiThread {
-                    procesarYConstruirCSV(csvData)
+                    procesarYConstruirCSV(csvData, ejecutarAccionesRemotas = true)
                     actualizarTextoUltimaSincro()
+
+                    // DPM/AudioManager ya han recibido las órdenes. Damos un pequeño margen para
+                    // que Android refleje el valor y entonces tomamos la telemetría real.
+                    handler.postDelayed({ enviarTelemetriaMDM() }, 1200L)
+
                     if (!modoSilencioso) {
                         Toast.makeText(this@MainActivity, "✨ ¡Sincronizado!", Toast.LENGTH_SHORT).show()
                     }
@@ -720,12 +699,12 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
-    private fun procesarYConstruirCSV(csvData: String) {
+    private fun procesarYConstruirCSV(csvData: String, ejecutarAccionesRemotas: Boolean = true) {
         try {
             val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
             val grupoFiltro = prefs.getString("ubicacion_dispositivo", "Seccion Finales linea 4") ?: "Seccion Finales linea 4"
 
-            val lineas = csvData.replace("\r", "").split("\n")
+            val filasCsv = parsearCsvSeguro(csvData)
 
             val nuevosBotones = mutableListOf<Pair<String, String>>()
             val listaNumerosPermitidos = mutableListOf<String>()
@@ -734,9 +713,26 @@ class MainActivity : AppCompatActivity() {
             var avisoEncontrado = ""
             var horaReinicioEncontrada = ""
 
-            for (linea in lineas) {
-                if (linea.isBlank()) continue
-                val partes = if (linea.contains(";")) linea.split(";") else linea.split(",")
+            var volumenCmd: Int? = null
+            var brilloCmd: Int? = null
+            var especialCmd = ""
+            var timeoutCmd = ""
+            var ttsLocalCmd = ""
+            var ttsGlobalCmd = ""
+
+            for ((indiceFila, partes) in filasCsv.withIndex()) {
+                if (partes.isEmpty() || partes.all { it.isBlank() }) continue
+
+                // La cabecera NO es una orden MDM. Antes, "Megafonía GLOBAL" se interpretaba
+                // como un mensaje real y bloqueaba la megafonía por sección.
+                if (indiceFila == 0 && partes.getOrNull(0)?.trim()?.equals("Grupo", ignoreCase = true) == true) continue
+
+                if (partes.size >= 17) {
+                    val celdaGlobal = partes[16].trim()
+                    if (celdaGlobal.isNotEmpty()) {
+                        ttsGlobalCmd = celdaGlobal
+                    }
+                }
 
                 if (partes.size >= 3) {
                     val grupoExcel = partes[0].trim().replace("\"", "").replace("\uFEFF", "")
@@ -759,7 +755,6 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
 
-                    // COLUMNA 9 (Índice 8) -> Lista Blanca Global de Llamadas (Whitelist)
                     if (partes.size >= 9) {
                         val numeroPermitido = partes[8].trim().replace("\"", "").replace(" ", "").replace("+34", "").replace("-", "")
                         if (numeroPermitido.isNotEmpty()) {
@@ -767,7 +762,6 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
 
-                    // COLUMNA 10 (Índice 9) -> Minutos Inactividad Screensaver
                     if (partes.size >= 10) {
                         val minutosExcel = partes[9].trim().replace("\"", "").toIntOrNull()
                         if (minutosExcel != null && minutosExcel > 0) {
@@ -776,33 +770,65 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
 
-                    // Detección específica para ESTA SECCIÓN (Botones, Avisos y Aplicaciones)
                     if (grupoExcel.equals(grupoFiltro.trim(), ignoreCase = true)) {
                         if (partes.size >= 6) {
                             val textoAviso = partes[5].trim().replace("\"", "")
-                            if (textoAviso.isNotEmpty()) {
-                                avisoEncontrado = textoAviso
-                            }
+                            if (textoAviso.isNotEmpty()) avisoEncontrado = textoAviso
                         }
 
                         if (partes.size >= 7) {
                             val horaRein = partes[6].trim().replace("\"", "")
-                            if (horaRein.isNotEmpty()) {
-                                horaReinicioEncontrada = horaRein
-                            }
+                            if (horaRein.isNotEmpty()) horaReinicioEncontrada = horaRein
                         }
 
                         if (nombreExcel.isNotEmpty() && telefonoExcel.isNotEmpty()) {
                             nuevosBotones.add(Pair(nombreExcel, telefonoExcel))
                         }
 
-                        // COLUMNA 11 (Índice 10) -> Aplicaciones Extras Permitidas
                         if (partes.size >= 11) {
                             val appsExcel = partes[10].trim().replace("\"", "")
                             if (appsExcel.isNotEmpty()) {
                                 val appsSeparadas = appsExcel.split(" ", ",").map { it.trim() }.filter { it.isNotEmpty() }
                                 listaAppsPermitidas.addAll(appsSeparadas)
                             }
+                        }
+
+                        if (partes.size >= 12) {
+                            val celdaVol = partes[11].trim()
+                            if (celdaVol.isNotEmpty()) {
+                                val v = celdaVol.replace(Regex("[^0-9]"), "").toIntOrNull()
+                                if (v != null) volumenCmd = v
+                            }
+                        }
+
+                        if (partes.size >= 13) {
+                            val celdaBrillo = partes[12].trim()
+                            if (celdaBrillo.isNotEmpty()) {
+                                val b = celdaBrillo.replace(Regex("[^0-9]"), "").toIntOrNull()
+                                if (b != null) brilloCmd = b
+                            }
+                        }
+
+                        if (partes.size >= 14) {
+                            val celdaEspecial = partes[13].trim().uppercase(Locale.getDefault())
+                            if (celdaEspecial.isNotEmpty()) especialCmd = celdaEspecial
+                        }
+
+                        if (partes.size >= 15) {
+                            val celdaTimeout = partes[14].trim().uppercase(Locale.getDefault())
+                            if (celdaTimeout.isNotEmpty()) {
+                                if (celdaTimeout.contains("NUNCA")) {
+                                    timeoutCmd = "NUNCA"
+                                } else {
+                                    val t = celdaTimeout.replace(Regex("[^0-9]"), "")
+                                    if (t.isNotEmpty()) timeoutCmd = t
+                                }
+                            }
+                        }
+
+                        if (partes.size >= 16) {
+                            val celdaTts = partes[15].trim().replace("\"", "")
+                            if (celdaTts.isNotEmpty()) ttsLocalCmd = celdaTts
                         }
                     }
                 }
@@ -811,23 +837,508 @@ class MainActivity : AppCompatActivity() {
             if (horaReinicioEncontrada.isNotEmpty()) {
                 prefs.edit().putString("hora_reinicio_seccion", horaReinicioEncontrada).apply()
             }
-
             val appsFinales = listaAppsPermitidas.distinct()
             prefs.edit().putString("apps_permitidas", appsFinales.joinToString(",")).apply()
-
-            AppLog.info("Grupo: '$grupoFiltro' | Botones: ${nuevosBotones.size} | Apps: ${appsFinales.size} | Whitelist Col 9: ${listaNumerosPermitidos.size} núms")
 
             contactosGuardados = nuevosBotones.toList()
             whitelistGlobal = listaNumerosPermitidos.toList()
 
+            AppLog.info("MDM Parser -> Vol: $volumenCmd | Brillo: $brilloCmd | CMD: $especialCmd | TTS Local: $ttsLocalCmd")
+
             runOnUiThread {
-                configurarModoKioscoEstricto() // Refresca los permisos de bloqueo para autorizar las nuevas apps
+                configurarModoKioscoEstricto()
                 construirPanelDesdeNube(nuevosBotones, appsFinales)
                 actualizarBannerUrgencia(avisoEncontrado)
+
+                if (volumenCmd != null) aplicarVolumenRemoto(volumenCmd!!)
+                if (brilloCmd != null) aplicarBrilloRemoto(brilloCmd!!)
+                if (timeoutCmd.isNotEmpty() && timeoutCmd != ultimoTimeoutEjecutado) {
+                    aplicarTimeoutPantalla(timeoutCmd)
+                    ultimoTimeoutEjecutado = timeoutCmd
+                    prefs.edit().putString("mdm_ultimo_timeout", timeoutCmd).apply()
+                }
+
+                if (ejecutarAccionesRemotas) {
+                    // FIX1.1: los comandos de estado (ROBADA/BLOQUEO/DESBLOQUEAR) son idempotentes.
+                    // No se pueden tratar igual que REINICIAR/ALARMA, porque si el primer DESBLOQUEAR
+                    // no llega a cerrar la UI por cualquier recreación/race, bloquearlo por "último comando"
+                    // deja el terminal atrapado para siempre.
+                    procesarComandoEspecialRemoto(especialCmd, prefs)
+
+                    val hayGlobalNuevo = ttsGlobalCmd.isNotEmpty() && ttsGlobalCmd != ultimoTTSGlobal
+                    if (ttsGlobalCmd != ultimoTTSGlobal) {
+                        if (ttsGlobalCmd.isEmpty()) {
+                            ultimoTTSGlobal = ""
+                            prefs.edit().putString("mdm_ultimo_tts_global", "").apply()
+                        } else {
+                            solicitarTts(ttsGlobalCmd, esGlobal = true)
+                        }
+                    }
+
+                    if (ttsLocalCmd != ultimoTTSLocal) {
+                        if (ttsLocalCmd.isEmpty()) {
+                            ultimoTTSLocal = ""
+                            prefs.edit().putString("mdm_ultimo_tts_local", "").apply()
+                        } else if (!hayGlobalNuevo && ttsPendienteGlobal.isEmpty()) {
+                            // Un global ya reproducido que siga escrito en Sheets no bloquea para siempre los avisos locales.
+                            solicitarTts(ttsLocalCmd, esGlobal = false)
+                        }
+                    }
+                }
             }
         } catch (e: Exception) {
             AppLog.error("Error procesando CSV: ${e.message}")
             e.printStackTrace()
+        }
+    }
+
+    private fun parsearCsvSeguro(csvData: String): List<List<String>> {
+        if (csvData.isBlank()) return emptyList()
+
+        // Google Sheets publicado como CSV usa normalmente coma. Se detecta ';' solo si
+        // la cabecera realmente lo usa como separador; nunca por encontrar ';' en un texto.
+        val primeraLinea = csvData.lineSequence().firstOrNull() ?: ""
+        val delimitador = if (primeraLinea.count { it == ';' } > primeraLinea.count { it == ',' }) ';' else ','
+
+        val filas = mutableListOf<List<String>>()
+        var fila = mutableListOf<String>()
+        val campo = StringBuilder()
+        var entreComillas = false
+        var i = 0
+
+        fun cerrarCampo() {
+            fila.add(campo.toString())
+            campo.setLength(0)
+        }
+
+        fun cerrarFila() {
+            cerrarCampo()
+            filas.add(fila)
+            fila = mutableListOf()
+        }
+
+        while (i < csvData.length) {
+            val c = csvData[i]
+            when {
+                c == '"' -> {
+                    if (entreComillas && i + 1 < csvData.length && csvData[i + 1] == '"') {
+                        campo.append('"')
+                        i++
+                    } else {
+                        entreComillas = !entreComillas
+                    }
+                }
+                c == delimitador && !entreComillas -> cerrarCampo()
+                c == '\n' && !entreComillas -> cerrarFila()
+                c == '\r' && !entreComillas -> Unit
+                else -> campo.append(c)
+            }
+            i++
+        }
+
+        if (campo.isNotEmpty() || fila.isNotEmpty()) cerrarFila()
+        return filas
+    }
+
+    // --- FUNCIONES MDM DE CONTROL REMOTO TOTAL ---
+
+    private fun aplicarVolumenRemoto(nivelPorcentaje: Int) {
+        val nivelSeguro = nivelPorcentaje.coerceIn(0, 100)
+        mdmVolumenObjetivo = nivelSeguro
+        getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
+            .edit().putInt("mdm_volumen_objetivo", nivelSeguro).apply()
+
+        try {
+            val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            if (audioManager.isVolumeFixed) {
+                AppLog.warning("MDM: el dispositivo informa política de volumen fijo; no se puede cambiar por AudioManager.")
+                return
+            }
+
+            fun aplicarStream(stream: Int, nombre: String) {
+                try {
+                    val max = audioManager.getStreamMaxVolume(stream)
+                    val objetivo = (nivelSeguro * max) / 100
+                    audioManager.setStreamVolume(stream, objetivo, 0)
+                    val real = audioManager.getStreamVolume(stream)
+                    val realPct = if (max > 0) (real * 100) / max else 0
+                    if (stream == AudioManager.STREAM_MUSIC) {
+                        getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
+                            .edit().putInt("mdm_ultimo_volumen_real_pct", realPct).apply()
+                    }
+                    AppLog.info("MDM volumen $nombre -> objetivo=$nivelSeguro% índice=$objetivo/$max real=$realPct% ($real/$max)")
+                } catch (se: SecurityException) {
+                    AppLog.error("MDM volumen $nombre bloqueado por Android: ${se.message}")
+                } catch (e: Exception) {
+                    AppLog.error("MDM volumen $nombre error: ${e.message}")
+                }
+            }
+
+            aplicarStream(AudioManager.STREAM_MUSIC, "MUSIC")
+            aplicarStream(AudioManager.STREAM_RING, "RING")
+            aplicarStream(AudioManager.STREAM_ALARM, "ALARM")
+        } catch (e: Exception) {
+            AppLog.error("MDM: Error al ajustar volumen: ${e.message}")
+        }
+    }
+
+    private fun aplicarBrilloRemoto(nivelPorcentaje: Int) {
+        try {
+            val nivelSeguro = nivelPorcentaje.coerceIn(0, 100)
+            val brilloAbsoluto = ((nivelSeguro * 255) / 100).coerceIn(1, 255)
+            val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+            val adminName = ComponentName(this, MyAdminReceiver::class.java)
+
+            var aplicado = false
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && dpm.isDeviceOwnerApp(packageName)) {
+                // Vía correcta para un Device Owner: no depende del permiso especial WRITE_SETTINGS.
+                dpm.setSystemSetting(adminName, Settings.System.SCREEN_BRIGHTNESS_MODE, Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL.toString())
+                dpm.setSystemSetting(adminName, Settings.System.SCREEN_BRIGHTNESS, brilloAbsoluto.toString())
+                aplicado = true
+            } else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.System.canWrite(this)) {
+                Settings.System.putInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS_MODE, Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL)
+                Settings.System.putInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS, brilloAbsoluto)
+                aplicado = true
+            }
+
+            if (!aplicado) {
+                AppLog.warning("MDM: brillo no aplicado; no es Device Owner compatible y WRITE_SETTINGS no está concedido.")
+                return
+            }
+
+            val params = window.attributes
+            params.screenBrightness = WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+            window.attributes = params
+
+            val real = Settings.System.getInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS, -1)
+            val realPct = if (real >= 0) (real * 100) / 255 else -1
+            if (realPct >= 0) {
+                getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
+                    .edit().putInt("mdm_ultimo_brillo_real_pct", realPct).apply()
+            }
+            AppLog.info("MDM: brillo objetivo=$nivelSeguro% ($brilloAbsoluto/255), leído=$realPct% ($real/255)")
+
+            // Segunda lectura diferida: algunos firmwares reflejan el cambio de Settings.System
+            // unas décimas después de la llamada de DevicePolicyManager.
+            handler.postDelayed({
+                try {
+                    val real2 = Settings.System.getInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS, -1)
+                    val realPct2 = if (real2 >= 0) (real2 * 100) / 255 else -1
+                    if (realPct2 >= 0) {
+                        getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
+                            .edit().putInt("mdm_ultimo_brillo_real_pct", realPct2).apply()
+                    }
+                    AppLog.info("MDM: verificación brillo diferida -> $realPct2% ($real2/255)")
+                } catch (e: Exception) {
+                    AppLog.error("MDM: error verificando brillo diferido: ${e.message}")
+                }
+            }, 500L)
+        } catch (e: Exception) {
+            AppLog.error("MDM: Error al ajustar brillo: ${e.message}")
+        }
+    }
+
+    private fun aplicarTimeoutPantalla(valor: String) {
+        try {
+            val milis = if (valor == "NUNCA") Int.MAX_VALUE else (valor.toIntOrNull() ?: return) * 1000
+            val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+            val adminName = ComponentName(this, MyAdminReceiver::class.java)
+
+            var aplicado = false
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && dpm.isDeviceOwnerApp(packageName)) {
+                dpm.setSystemSetting(adminName, Settings.System.SCREEN_OFF_TIMEOUT, milis.toString())
+                aplicado = true
+            } else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.System.canWrite(this)) {
+                Settings.System.putInt(contentResolver, Settings.System.SCREEN_OFF_TIMEOUT, milis)
+                aplicado = true
+            }
+
+            if (aplicado) {
+                AppLog.info("MDM: Tiempo de pantalla ajustado a $valor ($milis ms)")
+            } else {
+                AppLog.warning("MDM: timeout no aplicado; falta Device Owner compatible o WRITE_SETTINGS.")
+            }
+        } catch (e: Exception) {
+            AppLog.error("MDM: Error al ajustar Timeout: ${e.message}")
+        }
+    }
+
+    private fun configurarListenerTts() {
+        if (!::tts.isInitialized) return
+        tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+            override fun onStart(utteranceId: String?) {
+                AppLog.info("MDM TTS: reproducción iniciada id=$utteranceId")
+            }
+
+            override fun onDone(utteranceId: String?) {
+                runOnUiThread {
+                    val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
+                    when {
+                        utteranceId?.startsWith("TTS_GLOBAL|") == true -> {
+                            val texto = utteranceId.substringAfter('|')
+                            ultimoTTSGlobal = texto
+                            ttsPendienteGlobal = ""
+                            prefs.edit().putString("mdm_ultimo_tts_global", texto).apply()
+                        }
+                        utteranceId?.startsWith("TTS_LOCAL|") == true -> {
+                            val texto = utteranceId.substringAfter('|')
+                            ultimoTTSLocal = texto
+                            ttsPendienteLocal = ""
+                            prefs.edit().putString("mdm_ultimo_tts_local", texto).apply()
+                        }
+                    }
+                    restaurarVolumenTrasTts()
+                    AppLog.success("MDM TTS: reproducción finalizada correctamente.")
+                    reproducirTtsPendienteSiProcede()
+                }
+            }
+
+            @Deprecated("Deprecated in Java")
+            override fun onError(utteranceId: String?) {
+                onError(utteranceId, TextToSpeech.ERROR)
+            }
+
+            override fun onError(utteranceId: String?, errorCode: Int) {
+                runOnUiThread {
+                    restaurarVolumenTrasTts()
+                    AppLog.error("MDM TTS: error de reproducción id=$utteranceId code=$errorCode")
+                }
+            }
+        })
+    }
+
+    private fun solicitarTts(texto: String, esGlobal: Boolean) {
+        if (texto.isBlank()) return
+        if (esGlobal) ttsPendienteGlobal = texto else ttsPendienteLocal = texto
+
+        if (!isTtsReady) {
+            AppLog.warning("MDM: Motor TTS aún no listo; mensaje ${if (esGlobal) "GLOBAL" else "LOCAL"} queda pendiente.")
+            return
+        }
+        reproducirTtsPendienteSiProcede()
+    }
+
+    private fun reproducirTtsPendienteSiProcede() {
+        if (!isTtsReady || !::tts.isInitialized || tts.isSpeaking) return
+        val esGlobal = ttsPendienteGlobal.isNotBlank()
+        val texto = if (esGlobal) ttsPendienteGlobal else ttsPendienteLocal
+        if (texto.isBlank()) return
+        hablarTexto(texto, esGlobal)
+    }
+
+    private fun hablarTexto(texto: String, esGlobal: Boolean): Boolean {
+        return try {
+            if (!isTtsReady) return false
+            val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            if (volumenAntesDeTts == null) volumenAntesDeTts = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+            val maxVolMusic = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, maxVolMusic, 0)
+
+            val params = Bundle().apply {
+                putInt(TextToSpeech.Engine.KEY_PARAM_STREAM, AudioManager.STREAM_MUSIC)
+            }
+            val prefijo = if (esGlobal) "TTS_GLOBAL" else "TTS_LOCAL"
+            val utteranceId = "$prefijo|$texto"
+            val resultado = tts.speak(texto, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
+            AppLog.info("🗣️ Megafonía ${if (esGlobal) "GLOBAL" else "LOCAL"} solicitada -> resultado=$resultado texto=$texto")
+            if (resultado != TextToSpeech.SUCCESS) {
+                restaurarVolumenTrasTts()
+                false
+            } else true
+        } catch (e: Exception) {
+            restaurarVolumenTrasTts()
+            AppLog.error("MDM: Error ejecutando Megafonía TTS: ${e.message}")
+            false
+        }
+    }
+
+    private fun restaurarVolumenTrasTts() {
+        try {
+            val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+            val objetivoPersistido = mdmVolumenObjetivo?.let { (it * max) / 100 }
+            val restaurar = objetivoPersistido ?: volumenAntesDeTts
+            if (restaurar != null) audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, restaurar.coerceIn(0, max), 0)
+        } catch (_: Exception) {
+        } finally {
+            volumenAntesDeTts = null
+        }
+    }
+
+    private fun procesarComandoEspecialRemoto(comandoRaw: String, prefs: android.content.SharedPreferences) {
+        val comando = comandoRaw.trim().uppercase(Locale.getDefault())
+        val roboActivo = prefs.getBoolean("mdm_robo_activo", false)
+        val dialogVisible = dialogBloqueoRobo?.isShowing == true
+
+        AppLog.info(
+            "MDM CMD -> Nube=[$comando] | Último=[$ultimoComandoEjecutado] | " +
+                    "RoboActivo=$roboActivo | DialogVisible=$dialogVisible"
+        )
+
+        when (comando) {
+            "ROBADA", "BLOQUEO" -> {
+                // Estado deseado: bloqueado. Si tras un reboot/recreación el estado quedó activo
+                // pero la pantalla no está visible, la reconstruimos.
+                if (!roboActivo || !dialogVisible) {
+                    ejecutarComandoEspecial(comando)
+                }
+                ultimoComandoEjecutado = comando
+                prefs.edit().putString("mdm_ultimo_comando", comando).commit()
+            }
+
+            "DESBLOQUEAR" -> {
+                // Estado deseado: desbloqueado. Se reintenta mientras quede CUALQUIER evidencia
+                // de bloqueo, aunque DESBLOQUEAR ya figure como último comando.
+                if (roboActivo || dialogVisible || ultimoComandoEjecutado != comando) {
+                    ejecutarComandoEspecial(comando)
+                } else {
+                    AppLog.info("MDM: DESBLOQUEAR confirmado; el terminal ya estaba desbloqueado.")
+                }
+                ultimoComandoEjecutado = comando
+                prefs.edit().putString("mdm_ultimo_comando", comando).commit()
+            }
+
+            "" -> {
+                // Limpiar la celda rearma los comandos de una sola ejecución para permitir
+                // lanzar de nuevo REINICIAR/ALARMA más adelante con el mismo texto.
+                if (ultimoComandoEjecutado.isNotEmpty()) {
+                    ultimoComandoEjecutado = ""
+                    prefs.edit().putString("mdm_ultimo_comando", "").commit()
+                    AppLog.info("MDM: celda de comando vacía; motor de comandos rearmado.")
+                }
+            }
+
+            else -> {
+                // Comandos de una sola ejecución: persistir ANTES es importante para REINICIAR,
+                // así evitamos que el mismo comando se repita tras el boot.
+                if (comando != ultimoComandoEjecutado) {
+                    ultimoComandoEjecutado = comando
+                    prefs.edit().putString("mdm_ultimo_comando", comando).commit()
+                    ejecutarComandoEspecial(comando)
+                }
+            }
+        }
+    }
+
+    private fun ejecutarComandoEspecial(comando: String) {
+        AppLog.warning("MDM: COMANDO ESPECIAL RECIBIDO -> [$comando]")
+        when (comando) {
+            "REINICIAR" -> {
+                enviarAlertaITCRasante("🔄 MDM: Ejecutando orden de REINICIO forzado.")
+                val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+                val adminName = ComponentName(this, MyAdminReceiver::class.java)
+                if (dpm.isDeviceOwnerApp(packageName)) {
+                    dpm.reboot(adminName)
+                } else {
+                    Runtime.getRuntime().exec("reboot")
+                }
+            }
+            "ALARMA" -> {
+                aplicarVolumenRemoto(100)
+                val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+                vibrator.vibrate(longArrayOf(0, 1000, 500, 1000, 500, 1000, 500, 1000, 500, 1000), -1)
+                try {
+                    val notification = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                    val r = RingtoneManager.getRingtone(applicationContext, notification)
+                    r.play()
+                    Handler(Looper.getMainLooper()).postDelayed({ r.stop() }, 10000)
+                } catch (e: Exception) {}
+            }
+            "ROBADA", "BLOQUEO" -> {
+                val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
+                val guardado = prefs.edit().putBoolean("mdm_robo_activo", true).commit()
+                AppLog.warning("MDM: activando estado ROBADA/BLOQUEO. Persistencia=$guardado")
+                mostrarPantallaRobo()
+            }
+            "DESBLOQUEAR" -> {
+                val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
+                val guardado = prefs.edit().putBoolean("mdm_robo_activo", false).commit()
+                runOnUiThread {
+                    val estabaVisible = dialogBloqueoRobo?.isShowing == true
+                    try {
+                        dialogBloqueoRobo?.dismiss()
+                    } catch (e: Exception) {
+                        AppLog.error("MDM: error cerrando pantalla ROBADA: ${e.message}")
+                    } finally {
+                        dialogBloqueoRobo = null
+                    }
+                    AppLog.success(
+                        "MDM: DESBLOQUEAR aplicado. Persistencia=$guardado | " +
+                                "DialogEstabaVisible=$estabaVisible | RoboActivoAhora=${prefs.getBoolean("mdm_robo_activo", true)}"
+                    )
+                }
+            }
+            else -> AppLog.info("MDM: Comando desconocido ignorado.")
+        }
+    }
+
+    private fun mostrarPantallaRobo() {
+        if (dialogBloqueoRobo != null && dialogBloqueoRobo!!.isShowing) return
+
+        runOnUiThread {
+            try {
+                dialogBloqueoRobo = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen).apply {
+                    window?.let { win ->
+                        win.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                                or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                                or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                                or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                                or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                                or View.SYSTEM_UI_FLAG_FULLSCREEN)
+
+                        @Suppress("DEPRECATION")
+                        win.addFlags(
+                            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                        )
+                    }
+
+                    val rootLayout = LinearLayout(context).apply {
+                        orientation = LinearLayout.VERTICAL
+                        gravity = Gravity.CENTER
+                        background = GradientDrawable(
+                            GradientDrawable.Orientation.TOP_BOTTOM,
+                            intArrayOf(Color.parseColor("#7F1D1D"), Color.parseColor("#450A0A"))
+                        )
+                        setPadding(40, 40, 40, 40)
+                    }
+
+                    val tvIcono = TextView(context).apply {
+                        text = "🔒"
+                        textSize = 100f
+                        gravity = Gravity.CENTER
+                    }
+
+                    val tvAlerta = TextView(context).apply {
+                        text = "DISPOSITIVO BLOQUEADO"
+                        setTextColor(Color.WHITE)
+                        textSize = 35f
+                        gravity = Gravity.CENTER
+                        setTypeface(null, Typeface.BOLD)
+                        layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 40, 0, 20) }
+                    }
+
+                    val tvInfo = TextView(context).apply {
+                        text = "Este terminal es propiedad exclusiva de GRUPO TGT y ha sido reportado como PERDIDO o ROBADO.\n\nPor favor, devuélvalo a su departamento de sistemas o a la autoridad competente."
+                        setTextColor(Color.parseColor("#FECACA"))
+                        textSize = 20f
+                        gravity = Gravity.CENTER
+                        layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, 60) }
+                    }
+
+                    rootLayout.addView(tvIcono)
+                    rootLayout.addView(tvAlerta)
+                    rootLayout.addView(tvInfo)
+
+                    setContentView(rootLayout)
+                    setCancelable(false)
+                    show()
+                }
+            } catch (e: Exception) {
+                AppLog.error("MDM: Error al mostrar bloqueo por robo: ${e.message}")
+            }
         }
     }
 
@@ -852,7 +1363,6 @@ class MainActivity : AppCompatActivity() {
             panelBase?.removeAllViews()
             val listaBotonesUI = mutableListOf<Button>()
 
-            // 1. Crear botones rojos para los contactos telefónicos
             for (contacto in listaContactos) {
                 val nombre = contacto.first
                 val numero = contacto.second
@@ -881,7 +1391,6 @@ class MainActivity : AppCompatActivity() {
                 listaBotonesUI.add(btn)
             }
 
-            // 2. Crear botones azules para las aplicaciones extra permitidas
             val pm = packageManager
             for (appPackage in listaApps) {
                 try {
@@ -893,7 +1402,6 @@ class MainActivity : AppCompatActivity() {
                         setTextColor(Color.WHITE)
                         textSize = 16f
                         typeface = Typeface.DEFAULT_BOLD
-                        // Azul corporativo para distinguirlas de las llamadas
                         backgroundTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#2563EB"))
                         elevation = 8f
 
@@ -918,7 +1426,6 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-            // 3. Pintar todos los botones en la cuadrícula (2 por fila)
             var filaActual: LinearLayout? = null
             for (index in listaBotonesUI.indices) {
                 if (index % 2 == 0) {
@@ -1361,10 +1868,17 @@ class MainActivity : AppCompatActivity() {
         handler.removeCallbacks(runnableAutoCheckOTA)
         handler.removeCallbacks(runnableReloj)
         handlerInactividad.removeCallbacks(runnableScreensaver)
+
+        if (::tts.isInitialized) {
+            tts.stop()
+            tts.shutdown()
+        }
+
         try { unregisterReceiver(callStateReceiver) } catch (e: Exception) {}
 
         try { dialogoOTA?.dismiss() } catch (e: Exception) {}
         try { dialogScreensaver?.dismiss() } catch (e: Exception) {}
+        try { dialogBloqueoRobo?.dismiss() } catch (e: Exception) {}
         liberarPantalla()
     }
 
@@ -1374,15 +1888,13 @@ class MainActivity : AppCompatActivity() {
             val componentName = ComponentName(this, MyAdminReceiver::class.java)
 
             if (devicePolicyManager.isDeviceOwnerApp(packageName)) {
-                // Leer las apps extra permitidas desde la memoria y añadirlas al candado
                 val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
                 val appsStr = prefs.getString("apps_permitidas", "") ?: ""
                 val appsList = if (appsStr.isNotEmpty()) appsStr.split(",") else emptyList()
 
-                val paquetesAutorizados = mutableListOf(packageName) // El Launcher siempre debe estar autorizado
+                val paquetesAutorizados = mutableListOf(packageName)
                 paquetesAutorizados.addAll(appsList)
 
-                // Enviar la orden de autorización masiva a Android
                 devicePolicyManager.setLockTaskPackages(componentName, paquetesAutorizados.toTypedArray())
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -1469,9 +1981,22 @@ class MainActivity : AppCompatActivity() {
     private fun forzarVolumenMaximo() {
         try {
             val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC), 0)
-            audioManager.setStreamVolume(AudioManager.STREAM_RING, audioManager.getStreamMaxVolume(AudioManager.STREAM_RING), 0)
-            audioManager.setStreamVolume(AudioManager.STREAM_ALARM, audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0)
+            if (mdmVolumenObjetivo == null) {
+                val guardado = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE).getInt("mdm_volumen_objetivo", -1)
+                if (guardado in 0..100) mdmVolumenObjetivo = guardado
+            }
+            val maxVolMusic = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+            val maxVolRing = audioManager.getStreamMaxVolume(AudioManager.STREAM_RING)
+            val maxVolAlarm = audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM)
+
+            // Respetar el nivel que dictó el MDM en lugar del 100% obligatorio.
+            val targetMusic = mdmVolumenObjetivo?.let { (it * maxVolMusic) / 100 } ?: maxVolMusic
+            val targetRing = mdmVolumenObjetivo?.let { (it * maxVolRing) / 100 } ?: maxVolRing
+            val targetAlarm = mdmVolumenObjetivo?.let { (it * maxVolAlarm) / 100 } ?: maxVolAlarm
+
+            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, targetMusic, 0)
+            audioManager.setStreamVolume(AudioManager.STREAM_RING, targetRing, 0)
+            audioManager.setStreamVolume(AudioManager.STREAM_ALARM, targetAlarm, 0)
         } catch (e: Exception) { e.printStackTrace() }
     }
 
@@ -1930,7 +2455,9 @@ class MainActivity : AppCompatActivity() {
             .followSslRedirects(true)
             .build()
 
-        val request = Request.Builder().url(URL_OTA_JSON).build()
+        val urlOtaSinCache = "$URL_OTA_JSON?t=${System.currentTimeMillis()}"
+        val request = Request.Builder().url(urlOtaSinCache).build()
+
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
                 AppLog.error("OTA Error Red consultando version.json: ${e.message}")
@@ -2047,7 +2574,6 @@ class MainActivity : AppCompatActivity() {
         try {
             val packageInstaller = packageManager.packageInstaller
 
-            // Limpieza preventiva de sesiones anteriores para evitar "Too many active sessions"
             try {
                 val sessions = packageInstaller.mySessions
                 for (sessionInfo in sessions) {
@@ -2102,20 +2628,22 @@ class MainActivity : AppCompatActivity() {
     }
 
     // --- SISTEMA DE INVENTARIO Y TELEMETRÍA MDM TGT ---
+    @SuppressLint("MissingPermission")
     private fun enviarTelemetriaMDM() {
         Thread {
             try {
-                // 1. Recopilar datos básicos
                 val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
                 val ubicacion = prefs.getString("ubicacion_dispositivo", "Desconocida") ?: "Desconocida"
                 val androidId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID) ?: "Desconocido"
-                val modelo = Build.MODEL ?: "Desconocido"
 
-                // Versión de la APP
+                val fabricante = Build.MANUFACTURER.uppercase(Locale.getDefault())
+                val modelo = Build.MODEL ?: "Desconocido"
+                val dispositivoFull = "$fabricante $modelo"
+                val androidOS = "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})"
+
                 val pInfo = packageManager.getPackageInfo(packageName, 0)
                 val versionApp = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) pInfo.longVersionCode.toString() else pInfo.versionCode.toString()
 
-                // Batería
                 val batteryStatus = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
                 val level = batteryStatus?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
                 val scale = batteryStatus?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
@@ -2123,7 +2651,20 @@ class MainActivity : AppCompatActivity() {
                 val pctBateria = if (scale > 0) (level * 100) / scale else 0
                 val estadoBat = if (isCharging) "🔌 $pctBateria%" else "🔋 $pctBateria%"
 
-                // 🌟 NUEVO: Obtener MAC Real usando privilegios Device Owner (Bypass Android 11+)
+                val tempBat = batteryStatus?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) ?: 0
+                val temperaturaFinal = "${tempBat / 10.0}ºC"
+
+                val health = batteryStatus?.getIntExtra(BatteryManager.EXTRA_HEALTH, 0) ?: 0
+                val saludBat = when (health) {
+                    BatteryManager.BATTERY_HEALTH_GOOD -> "❤️ Buena"
+                    BatteryManager.BATTERY_HEALTH_OVERHEAT -> "🔥 Sobrecalentada"
+                    BatteryManager.BATTERY_HEALTH_DEAD -> "💀 Muerta"
+                    BatteryManager.BATTERY_HEALTH_OVER_VOLTAGE -> "⚡ Sobretensión"
+                    BatteryManager.BATTERY_HEALTH_UNSPECIFIED_FAILURE -> "❌ Fallo"
+                    BatteryManager.BATTERY_HEALTH_COLD -> "❄️ Fría"
+                    else -> "❓ Desconocida"
+                }
+
                 var macReal = "02:00:00:00:00:00"
                 try {
                     val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
@@ -2136,7 +2677,6 @@ class MainActivity : AppCompatActivity() {
                     }
                 } catch (e: Exception) {}
 
-                // Si por hardware no se ha podido sacar la MAC por DPM, intentamos el método clásico de red
                 if (macReal == "02:00:00:00:00:00") {
                     try {
                         val interfaces = NetworkInterface.getNetworkInterfaces()
@@ -2155,9 +2695,20 @@ class MainActivity : AppCompatActivity() {
                     } catch (e: Exception) {}
                 }
 
-                // IP Local
                 var ipLocal = "Desconectado"
+                var tipoConexionStr = "Ninguna"
                 try {
+                    val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+                    val activeNetwork = cm.activeNetwork
+                    if (activeNetwork != null) {
+                        val caps = cm.getNetworkCapabilities(activeNetwork)
+                        if (caps != null) {
+                            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) tipoConexionStr = "Wi-Fi"
+                            else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) tipoConexionStr = "Datos Móviles"
+                            else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) tipoConexionStr = "Ethernet"
+                        }
+                    }
+
                     val interfaces = NetworkInterface.getNetworkInterfaces()
                     while (interfaces.hasMoreElements()) {
                         val intf = interfaces.nextElement()
@@ -2171,16 +2722,94 @@ class MainActivity : AppCompatActivity() {
                     }
                 } catch (e: Exception) {}
 
-                // RSSI (Señal Wi-Fi)
+                var nombreRedStr = "Desconectado"
+                try {
+                    val wifiMgr = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+                    val info = wifiMgr.connectionInfo
+                    if (info != null && info.networkId != -1) {
+                        nombreRedStr = info.ssid.replace("\"", "")
+                        if (nombreRedStr == "<unknown ssid>") nombreRedStr = "Oculta/Desconocida"
+                    }
+                } catch (e: Exception) {}
+
+                var operadoraFinal = "Sin SIM / Desconocida"
+                try {
+                    val tm = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
+                    val opName = tm.networkOperatorName
+                    if (!opName.isNullOrBlank()) {
+                        operadoraFinal = opName
+                    }
+                } catch (e: Exception) {}
+
                 val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
                 val rssi = wifiManager?.connectionInfo?.rssi ?: 0
 
-                // Almacenamiento y Uptime
                 var espacioLibre = "Desconocido"
                 try {
                     val stat = StatFs(Environment.getExternalStorageDirectory().path)
                     val gbDisponibles = (stat.availableBlocksLong * stat.blockSizeLong) / (1024 * 1024 * 1024)
-                    espacioLibre = "$gbDisponibles GB"
+                    val gbTotales = (stat.blockCountLong * stat.blockSizeLong) / (1024 * 1024 * 1024)
+                    espacioLibre = "$gbDisponibles GB libres (de $gbTotales GB)"
+                } catch (e: Exception) {}
+
+                var ramEstado = "Desconocida"
+                try {
+                    val actManager = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+                    val memInfo = android.app.ActivityManager.MemoryInfo()
+                    actManager.getMemoryInfo(memInfo)
+                    val ramLibreGB = String.format(Locale.US, "%.2f", memInfo.availMem / (1024.0 * 1024.0 * 1024.0))
+                    val ramTotalGB = String.format(Locale.US, "%.2f", memInfo.totalMem / (1024.0 * 1024.0 * 1024.0))
+                    ramEstado = "$ramLibreGB GB libres (de $ramTotalGB GB)"
+                } catch (e: Exception) {}
+
+                var brilloPantalla = "Desconocido"
+                try {
+                    val brightness = Settings.System.getInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS)
+                    val pctBrillo = (brightness * 100) / 255
+                    brilloPantalla = "$pctBrillo%"
+                    prefs.edit().putInt("mdm_ultimo_brillo_real_pct", pctBrillo).apply()
+                } catch (e: Exception) {
+                    val ultimo = prefs.getInt("mdm_ultimo_brillo_real_pct", -1)
+                    if (ultimo >= 0) brilloPantalla = "$ultimo%"
+                    AppLog.error("Telemetría: no se pudo leer brillo actual: ${e.message}")
+                }
+
+                var volumenApp = "Desconocido"
+                try {
+                    val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+                    val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                    val volActual = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+
+                    // Durante una locución TTS subimos MUSIC temporalmente al máximo. Para el
+                    // Inventario interesa el nivel estable del terminal, no ese pico transitorio.
+                    val volEstable = volumenAntesDeTts ?: volActual
+                    val pctVol = if (maxVol > 0) (volEstable * 100) / maxVol else 0
+                    prefs.edit().putInt("mdm_ultimo_volumen_real_pct", pctVol).apply()
+                    volumenApp = if (pctVol == 0) "🔇 Silenciado" else "🔊 $pctVol%"
+                } catch (e: Exception) {
+                    val ultimo = prefs.getInt("mdm_ultimo_volumen_real_pct", -1)
+                    if (ultimo >= 0) volumenApp = if (ultimo == 0) "🔇 Silenciado" else "🔊 $ultimo%"
+                    AppLog.error("Telemetría: no se pudo leer volumen actual: ${e.message}")
+                }
+
+                AppLog.info("Telemetría MDM -> Brillo=$brilloPantalla | Volumen=$volumenApp")
+
+                var estadoKiosco = "Desconocido"
+                try {
+                    val am = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+                    val lockTaskMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        am.lockTaskModeState
+                    } else {
+                        @Suppress("DEPRECATION")
+                        if (am.isInLockTaskMode) 1 else 0
+                    }
+                    estadoKiosco = if (lockTaskMode != 0) "🔒 Activo" else "🔓 ROTO / Inactivo"
+                } catch (e: Exception) {}
+
+                var esOwner = "❌ No"
+                try {
+                    val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+                    if (dpm.isDeviceOwnerApp(packageName)) esOwner = "✅ Sí"
                 } catch (e: Exception) {}
 
                 val uptimeMillis = SystemClock.elapsedRealtime()
@@ -2188,35 +2817,61 @@ class MainActivity : AppCompatActivity() {
                 val horas = java.util.concurrent.TimeUnit.MILLISECONDS.toHours(uptimeMillis) % 24
                 val uptimeFinal = "${dias}d ${horas}h"
 
-                // 2. Montar el paquete de datos JSON
+                val intrusos = prefs.getInt("intentos_fallidos_pin", 0).toString()
+                val appsActivas = prefs.getString("apps_permitidas", "Ninguna") ?: "Ninguna"
+                val ultimaSincro = prefs.getString("ultima_sincro", "Nunca") ?: "Nunca"
+
+                val logsCompletos = AppLog.obtenerLogs().lines()
+                val ultimosLogs = if (logsCompletos.size > 3) {
+                    logsCompletos.takeLast(3).joinToString("\n")
+                } else {
+                    logsCompletos.joinToString("\n")
+                }
+
                 val json = JSONObject()
                 json.put("fecha", SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault()).format(Date()))
                 json.put("ubicacion", ubicacion)
-                json.put("modelo", modelo)
+                json.put("dispositivo", dispositivoFull)
+                json.put("androidOS", androidOS)
                 json.put("mac", macReal)
                 json.put("androidId", androidId)
                 json.put("ip", ipLocal)
+                json.put("conexion", tipoConexionStr)
+                json.put("redSSID", nombreRedStr)
+                json.put("operadora", operadoraFinal)
                 json.put("rssi", "$rssi dBm")
                 json.put("bateria", estadoBat)
-                json.put("version", "v$versionApp")
+                json.put("saludBateria", saludBat)
+                json.put("temperatura", temperaturaFinal)
+                json.put("ram", ramEstado)
                 json.put("almacenamiento", espacioLibre)
+                json.put("brillo", brilloPantalla)
+                json.put("volumen", volumenApp)
                 json.put("uptime", uptimeFinal)
+                json.put("estadoKiosco", estadoKiosco)
+                json.put("deviceOwner", esOwner)
+                json.put("version", "v$versionApp")
+                json.put("intrusiones", intrusos)
+                json.put("apps", appsActivas)
+                json.put("ultimaSincro", ultimaSincro)
+                json.put("logs", ultimosLogs)
 
-                // 3. Enviar a Google Sheets usando OkHttp nuevo formato
                 val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
                 val body = json.toString().toRequestBody(mediaType)
 
                 val request = Request.Builder()
-                    // ⚠️ IMPORTANTE: PEGA AQUÍ TU URL DEL SCRIPT DE GOOGLE ⚠️
                     .url("https://script.google.com/macros/s/AKfycbzs4U3PgP7gYTBGxFql0TyLY7fC6XQxzYLyPNOAn8nQlqQQFXAHIMQrXDyo5zwavg3etA/exec")
                     .post(body)
                     .build()
 
                 OkHttpClient().newCall(request).execute().use { response ->
-                    if (response.isSuccessful) {
-                        AppLog.info("📡 Inventario MDM actualizado correctamente en la nube.")
+                    val respuestaScript = response.body?.string()?.trim().orEmpty()
+                    if (response.isSuccessful && respuestaScript.equals("OK", ignoreCase = true)) {
+                        AppLog.info("📡 Inventario MDM actualizado correctamente. Brillo=$brilloPantalla | Volumen=$volumenApp")
                     } else {
-                        AppLog.error("Error HTTP enviando MDM: ${response.code}")
+                        // Apps Script puede devolver HTTP 200 incluso cuando su doPost() responde
+                        // con texto "ERROR: ...". Antes lo registrábamos falsamente como éxito.
+                        AppLog.error("Inventario MDM NO confirmado. HTTP=${response.code} respuesta=[$respuestaScript]")
                     }
                 }
             } catch (e: Exception) {

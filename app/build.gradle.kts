@@ -11,8 +11,8 @@ android {
         applicationId = "com.grupotgt.launcherkioscotgt"
         minSdk = 24
         targetSdk = 36
-        versionCode = 53
-        versionName = "52.0"
+        versionCode = 60
+        versionName = "60.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
