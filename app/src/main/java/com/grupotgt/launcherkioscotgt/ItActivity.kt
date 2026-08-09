@@ -38,6 +38,10 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.OkHttpClient
@@ -71,50 +75,99 @@ class ItActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_it)
 
+        // V63: Panel IT retro-terminal. Edge-to-edge controlado para respetar
+        // de forma real los márgenes superiores e inferiores en Android 15/16.
+        val rootScroll = findViewById<ScrollView>(R.id.itRootScroll)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.statusBarColor = Color.parseColor("#020704")
+        window.navigationBarColor = Color.parseColor("#020704")
+        WindowInsetsControllerCompat(window, rootScroll).apply {
+            isAppearanceLightStatusBars = false
+            isAppearanceLightNavigationBars = false
+        }
+
+        val baseLeft = rootScroll.paddingLeft
+        val baseTop = rootScroll.paddingTop
+        val baseRight = rootScroll.paddingRight
+        val baseBottom = rootScroll.paddingBottom
+        ViewCompat.setOnApplyWindowInsetsListener(rootScroll) { view, insets ->
+            val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.setPadding(
+                baseLeft,
+                baseTop + systemBars.top,
+                baseRight,
+                baseBottom + systemBars.bottom
+            )
+            insets
+        }
+        ViewCompat.requestApplyInsets(rootScroll)
+
         val etUbicacion = findViewById<AutoCompleteTextView>(R.id.etUbicacion)
         val btnGuardar = findViewById<Button>(R.id.btnGuardarConfig)
         val btnTestSincro = findViewById<Button>(R.id.btnTestSincro)
         val btnVerLogsIt = findViewById<Button>(R.id.btnVerLogsIt)
+        val btnWifiDiag = findViewById<Button>(R.id.btnWifiDiag)
         val btnForzarOTA = findViewById<Button>(R.id.btnForzarOTA)
         val btnPurgarApks = findViewById<Button>(R.id.btnPurgarApks)
         val btnCerrarPanelIT = findViewById<Button>(R.id.btnCerrarPanelIT)
+
         tvEstadoMantenimiento = findViewById(R.id.tvEstadoMantenimiento)
         btnModoMantenimiento = findViewById(R.id.btnModoMantenimiento)
         btnFinalizarMantenimiento = findViewById(R.id.btnFinalizarMantenimiento)
+
         val tvEstadoKiosco = findViewById<TextView>(R.id.tvEstadoKiosco)
         val tvVersionApp = findViewById<TextView>(R.id.tvVersionApp)
         val tvEstadoOTA = findViewById<TextView>(R.id.tvEstadoOTA)
 
+        val tvSaludAndroid = findViewById<TextView>(R.id.tvSaludAndroid)
+        val tvSaludDispositivo = findViewById<TextView>(R.id.tvSaludDispositivo)
+        val tvSaludBateria = findViewById<TextView>(R.id.tvSaludBateria)
+        val tvSaludRam = findViewById<TextView>(R.id.tvSaludRam)
         val tvTelemetriaUptime = findViewById<TextView>(R.id.tvTelemetriaUptime)
         val tvTelemetriaAlmacenamiento = findViewById<TextView>(R.id.tvTelemetriaAlmacenamiento)
+
+        val tvGestionDeviceOwner = findViewById<TextView>(R.id.tvGestionDeviceOwner)
+        val tvGestionKiosco = findViewById<TextView>(R.id.tvGestionKiosco)
+        val tvGestionPoliticas = findViewById<TextView>(R.id.tvGestionPoliticas)
+        val tvGestionConectividad = findViewById<TextView>(R.id.tvGestionConectividad)
+        val tvGestionPantalla = findViewById<TextView>(R.id.tvGestionPantalla)
+        val tvGestionSonido = findViewById<TextView>(R.id.tvGestionSonido)
+        val tvUltimaSincro = findViewById<TextView>(R.id.tvUltimaSincro)
+
+        val tvDiagPing = findViewById<TextView>(R.id.tvDiagPing)
         val tvTelemetriaRed = findViewById<TextView>(R.id.tvTelemetriaRed)
         val tvTelemetriaMovil = findViewById<TextView>(R.id.tvTelemetriaMovil)
         val tvTelemetriaHardware = findViewById<TextView>(R.id.tvTelemetriaHardware)
 
         val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
         val ubicacionActual = prefs.getString("ubicacion_dispositivo", "Seccion Finales linea 4")
-        etUbicacion?.setText(ubicacionActual)
-
+        etUbicacion.setText(ubicacionActual)
         cargarSeccionesEnDesplegable(etUbicacion, prefs)
 
-        // VERSIÓN DE LA APP, ANDROID Y AUDITORÍA DE ACTUALIZACIÓN
+        val colorOk = Color.parseColor("#A7FFB1")
+        val colorWarn = Color.parseColor("#FFE58A")
+        val colorError = Color.parseColor("#FF7B7B")
+        val colorNormal = Color.parseColor("#B9F7C1")
+
+        // -----------------------------------------------------------------
+        // IDENTIDAD + VERSIÓN + OTA
+        // -----------------------------------------------------------------
         try {
             val pInfo = packageManager.getPackageInfo(packageName, 0)
-            val versionName = pInfo.versionName ?: "1.0"
+            val versionName = pInfo.versionName ?: "?"
             val versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 pInfo.longVersionCode
             } else {
                 @Suppress("DEPRECATION")
                 pInfo.versionCode.toLong()
             }
-            val androidVer = Build.VERSION.RELEASE
-            val sdkVer = Build.VERSION.SDK_INT
             val fechaActualizacion = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault())
                 .format(Date(pInfo.lastUpdateTime))
 
             val instalador = try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                    packageManager.getInstallSourceInfo(packageName).installingPackageName ?: "Android / sistema"
+                    packageManager.getInstallSourceInfo(packageName).installingPackageName
+                        ?: "Android / sistema"
                 } else {
                     @Suppress("DEPRECATION")
                     packageManager.getInstallerPackageName(packageName) ?: "Android / sistema"
@@ -123,73 +176,140 @@ class ItActivity : AppCompatActivity() {
                 "No disponible"
             }
 
-            tvVersionApp?.text = "📱 App: v$versionName ($versionCode) | Android: $sdkVer (v$androidVer)"
-            tvEstadoOTA?.text =
-                "🔄 OTA automática: ACTIVA · comprobación cada 2 min\n" +
-                        "🕒 Última instalación/actualización: $fechaActualizacion\n" +
-                        "📦 Origen registrado por Android: $instalador"
+            tvVersionApp.text = "Version instalada      v$versionName ($versionCode)"
+            tvEstadoOTA.text =
+                "OTA automatica          ACTIVA\n" +
+                        "Comprobacion             cada 2 min\n" +
+                        "Ult. instalacion          $fechaActualizacion\n" +
+                        "Origen Android            $instalador"
         } catch (e: Exception) {
-            tvVersionApp?.text = "📱 Versión instalada: Desconocida"
-            tvEstadoOTA?.text = "⚠️ No se pudo leer el estado de actualización"
+            tvVersionApp.text = "Version instalada      NO DISPONIBLE"
+            tvVersionApp.setTextColor(colorWarn)
+            tvEstadoOTA.text = "OTA: no se pudo leer la auditoria local"
+            tvEstadoOTA.setTextColor(colorWarn)
         }
+
+        // -----------------------------------------------------------------
+        // KIOSCO / DEVICE OWNER / POLÍTICAS
+        // -----------------------------------------------------------------
+        var esDeviceOwner = false
+        var lockTaskActivo = false
+        var lockTaskPermitido = false
+        val mantenimientoActivo = MaintenanceModeManager.estaActivo(this)
 
         try {
             val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
-            val esDeviceOwner = dpm.isDeviceOwnerApp(packageName)
+            esDeviceOwner = dpm.isDeviceOwnerApp(packageName)
+            lockTaskPermitido = try { dpm.isLockTaskPermitted(packageName) } catch (_: Exception) { false }
 
             val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-            val lockTaskActivo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            lockTaskActivo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 activityManager.lockTaskModeState != ActivityManager.LOCK_TASK_MODE_NONE
             } else {
                 @Suppress("DEPRECATION")
                 activityManager.isInLockTaskMode
             }
 
-            val puedeSolicitarApk = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                packageManager.canRequestPackageInstalls()
-            } else {
-                true
+            val estadoPrincipal = when {
+                mantenimientoActivo -> "● MANTENIMIENTO IT ACTIVO"
+                esDeviceOwner && lockTaskActivo -> "● KIOSCO ACTIVO  ·  DEVICE OWNER OK"
+                esDeviceOwner -> "● DEVICE OWNER OK  ·  KIOSCO EN ESPERA"
+                else -> "● ATENCION  ·  DEVICE OWNER NO ACTIVO"
             }
+            tvEstadoKiosco.text = estadoPrincipal
+            tvEstadoKiosco.setTextColor(
+                when {
+                    mantenimientoActivo -> colorWarn
+                    esDeviceOwner && lockTaskActivo -> colorOk
+                    else -> colorError
+                }
+            )
 
-            val mantenimientoActivo = MaintenanceModeManager.estaActivo(this)
+            tvGestionDeviceOwner.text = "Device Owner   ${if (esDeviceOwner) "OK" else "ERROR"}"
+            tvGestionDeviceOwner.setTextColor(if (esDeviceOwner) colorOk else colorError)
 
-            tvEstadoKiosco?.text =
-                "📦 Paquete: $packageName\n" +
-                        "🔒 Kiosco: ${if (mantenimientoActivo) "🟠 SUSPENDIDO POR IT" else if (lockTaskActivo) "✅ ACTIVO" else "⚠️ INACTIVO"}\n" +
-                        "🛡️ Device Owner: ${if (esDeviceOwner) "✅ SÍ" else "❌ NO"}\n" +
-                        "📲 Instalación APK: ${if (puedeSolicitarApk || esDeviceOwner) "✅ PREPARADA" else "⚠️ REQUIERE REVISIÓN"}"
+            tvGestionKiosco.text = "Kiosco         ${when {
+                mantenimientoActivo -> "MANT."
+                lockTaskActivo -> "ACTIVO"
+                else -> "INACTIVO"
+            }}"
+            tvGestionKiosco.setTextColor(when {
+                mantenimientoActivo -> colorWarn
+                lockTaskActivo -> colorOk
+                else -> colorWarn
+            })
+
+            val politicasOk = esDeviceOwner && (lockTaskPermitido || mantenimientoActivo)
+            tvGestionPoliticas.text = "Politicas      ${if (politicasOk) "OK" else "REVISAR"}"
+            tvGestionPoliticas.setTextColor(if (politicasOk) colorOk else colorWarn)
         } catch (e: Exception) {
-            tvEstadoKiosco?.text = "📦 Paquete: $packageName\n⚠️ No se pudo completar el diagnóstico IT"
+            tvEstadoKiosco.text = "● DIAGNOSTICO KIOSCO NO DISPONIBLE"
+            tvEstadoKiosco.setTextColor(colorWarn)
+            tvGestionDeviceOwner.text = "Device Owner   --"
+            tvGestionKiosco.text = "Kiosco         --"
+            tvGestionPoliticas.text = "Politicas      --"
         }
 
-        // TIEMPO ACTIVO (UPTIME)
+        // -----------------------------------------------------------------
+        // SALUD DEL TERMINAL
+        // -----------------------------------------------------------------
+        tvSaludAndroid.text = "Android        ${Build.VERSION.RELEASE} / API ${Build.VERSION.SDK_INT}"
+        tvSaludDispositivo.text = "Dispositivo    ${Build.MANUFACTURER} ${Build.MODEL}"
+
         val uptimeMillis = SystemClock.elapsedRealtime()
         val dias = TimeUnit.MILLISECONDS.toDays(uptimeMillis)
         val horas = TimeUnit.MILLISECONDS.toHours(uptimeMillis) % 24
         val minutos = TimeUnit.MILLISECONDS.toMinutes(uptimeMillis) % 60
-        tvTelemetriaUptime?.text = "⏱️ Tiempo activo: $dias días, $horas hrs, $minutos min"
+        tvTelemetriaUptime.text = "Uptime         ${dias}d ${horas}h ${minutos}m"
 
-        // ALMACENAMIENTO LIBRE
         try {
-            val stat = StatFs(Environment.getExternalStorageDirectory().path)
-            val bytesDisponibles = stat.availableBlocksLong * stat.blockSizeLong
-            val gbDisponibles = bytesDisponibles / (1024 * 1024 * 1024)
-            tvTelemetriaAlmacenamiento?.text = "💾 Almacenamiento Libre: $gbDisponibles GB"
-        } catch (e: Exception) {
-            tvTelemetriaAlmacenamiento?.text = "💾 Almacenamiento Libre: Desconocido"
+            val stat = StatFs(Environment.getDataDirectory().path)
+            val totalBytes = stat.totalBytes
+            val freeBytes = stat.availableBytes
+            val usedBytes = (totalBytes - freeBytes).coerceAtLeast(0L)
+            val usedPct = if (totalBytes > 0L) ((usedBytes * 100L) / totalBytes).toInt() else 0
+            val freeGb = freeBytes / (1024L * 1024L * 1024L)
+            tvTelemetriaAlmacenamiento.text = "Almacenam.     ${usedPct}% / ${freeGb}GB libres"
+            tvTelemetriaAlmacenamiento.setTextColor(if (usedPct >= 90) colorError else if (usedPct >= 80) colorWarn else colorNormal)
+        } catch (_: Exception) {
+            tvTelemetriaAlmacenamiento.text = "Almacenam.     --"
         }
 
-        // TELEMETRÍA DE RED: WI-FI, RSSI E IP LOCAL
+        val actManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        val memInfo = ActivityManager.MemoryInfo()
+        actManager.getMemoryInfo(memInfo)
+        val ramTotalMb = memInfo.totalMem / (1024L * 1024L)
+        val ramLibreMb = memInfo.availMem / (1024L * 1024L)
+        val ramUsadaPct = if (memInfo.totalMem > 0L) {
+            (((memInfo.totalMem - memInfo.availMem) * 100L) / memInfo.totalMem).toInt()
+        } else 0
+        tvSaludRam.text = "RAM            ${ramUsadaPct}%"
+        tvSaludRam.setTextColor(if (ramUsadaPct >= 90) colorError else if (ramUsadaPct >= 80) colorWarn else colorNormal)
+
+        val batteryStatus = registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val batteryLevel = batteryStatus?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+        val batteryScale = batteryStatus?.getIntExtra(BatteryManager.EXTRA_SCALE, 100) ?: 100
+        val batteryPct = if (batteryLevel >= 0 && batteryScale > 0) batteryLevel * 100 / batteryScale else -1
+        val tempInt = batteryStatus?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) ?: 0
+        val temperaturaC = tempInt / 10.0
+        tvSaludBateria.text = "Bateria        ${if (batteryPct >= 0) "$batteryPct%" else "--"}"
+        if (batteryPct in 0..19) tvSaludBateria.setTextColor(colorWarn)
+
+        // -----------------------------------------------------------------
+        // RED / WI-FI / IP
+        // -----------------------------------------------------------------
+        var wifiOk = false
         try {
             val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
             val wifiInfo = wifiManager?.connectionInfo
-            val rssi = wifiInfo?.rssi ?: -99
+            val rssi = wifiInfo?.rssi ?: -100
             val nivelWifi = WifiManager.calculateSignalLevel(rssi, 5)
-            val calidades = listOf("Muy baja", "Baja", "Buena", "Excelente", "Máxima")
-            val calDesc = if (nivelWifi in 0..4) calidades[nivelWifi] else "Desconocida"
-            val ssid = wifiInfo?.ssid?.replace("\"", "") ?: "Desconocida"
+            val calidades = listOf("MUY BAJA", "BAJA", "BUENA", "EXCELENTE", "MAXIMA")
+            val calidad = if (nivelWifi in 0..4) calidades[nivelWifi] else "--"
+            val ssid = wifiInfo?.ssid?.replace("\"", "") ?: "--"
+            wifiOk = ssid.isNotBlank() && ssid != "<unknown ssid>" && rssi > -95
 
-            var ipLocal = "No disponible"
+            var ipLocal = "--"
             try {
                 val interfaces = NetworkInterface.getNetworkInterfaces()
                 while (interfaces.hasMoreElements()) {
@@ -202,77 +322,87 @@ class ItActivity : AppCompatActivity() {
                         }
                     }
                 }
-            } catch (e: Exception) {}
+            } catch (_: Exception) {}
 
-            tvTelemetriaRed?.text = "📶 Wi-Fi: $ssid ($rssi dBm - $calDesc)\n🌐 IP Local: $ipLocal\n👉 TOCA AQUÍ PARA ANALIZADOR WI-FI"
-        } catch (e: Exception) {
-            tvTelemetriaRed?.text = "📶 Wi-Fi e IP: No disponibles"
+            tvTelemetriaRed.text = "Wi-Fi  $ssid  |  $rssi dBm ($calidad)\nIP     $ipLocal\nToca WIFI para abrir el analizador"
+            tvTelemetriaRed.setTextColor(if (wifiOk) colorOk else colorWarn)
+            tvGestionConectividad.text = "Conectividad   ${if (wifiOk) "WIFI OK" else "REVISAR"}"
+            tvGestionConectividad.setTextColor(if (wifiOk) colorOk else colorWarn)
+        } catch (_: Exception) {
+            tvTelemetriaRed.text = "Wi-Fi / IP: no disponibles"
+            tvTelemetriaRed.setTextColor(colorWarn)
+            tvGestionConectividad.text = "Conectividad   --"
         }
 
-        // ESTADO DE LA SIM Y DATOS MÓVILES
+        // -----------------------------------------------------------------
+        // PANTALLA / SONIDO / HARDWARE / ADB
+        // -----------------------------------------------------------------
         try {
-            val telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
-            val operadorName = telephonyManager?.networkOperatorName?.ifEmpty { "Desconocido" } ?: "No disponible"
-            val simState = when (telephonyManager?.simState) {
-                TelephonyManager.SIM_STATE_READY -> "Insertada y lista"
-                TelephonyManager.SIM_STATE_ABSENT -> "Ausente"
-                else -> "Bloqueada o no lista"
-            }
-            tvTelemetriaMovil?.text = "📱 Operador Móvil: $operadorName\n💳 Estado SIM: $simState"
-        } catch (e: Exception) {
-            tvTelemetriaMovil?.text = "📱 Operador Móvil: Información no accesible"
-        }
-
-        // MEMORIA RAM, VOLÚMENES Y ESTADO DE ADB
-        try {
-            val actManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-            val memInfo = ActivityManager.MemoryInfo()
-            actManager.getMemoryInfo(memInfo)
-            val ramLibreMb = memInfo.availMem / (1024 * 1024)
-            val ramTotalMb = memInfo.totalMem / (1024 * 1024)
+            val brillo = Settings.System.getInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS, -1)
+            val brilloPct = if (brillo >= 0) ((brillo * 100) / 255).coerceIn(0, 100) else -1
+            tvGestionPantalla.text = "Pantalla       ${if (brilloPct >= 0) "$brilloPct%" else "--"}"
 
             val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-            val volRing = audioManager.getStreamVolume(AudioManager.STREAM_RING)
-            val maxRing = audioManager.getStreamMaxVolume(AudioManager.STREAM_RING)
             val volMusic = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-            val maxMusic = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+            val maxMusic = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).coerceAtLeast(1)
+            val volPct = (volMusic * 100 / maxMusic).coerceIn(0, 100)
+            tvGestionSonido.text = "Sonido         $volPct%"
+            tvGestionSonido.setTextColor(if (volPct == 0) colorWarn else colorOk)
 
             val adbEnabled = Settings.Global.getInt(contentResolver, Settings.Global.ADB_ENABLED, 0) == 1
-            val estadoAdb = if (adbEnabled) "🟢 Activado" else "🔴 Desactivado"
-
-            val batteryStatus = registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-            val tempInt = batteryStatus?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) ?: 0
-            val temperaturaC = tempInt / 10.0
-
-            tvTelemetriaHardware?.text = "🧠 RAM Libre: $ramLibreMb MB / $ramTotalMb MB\n" +
-                    "🔊 Vol. Tono: $volRing/$maxRing | Música: $volMusic/$maxMusic\n" +
-                    "🌡️ Temperatura: $temperaturaC °C\n" +
-                    "🔌 Depuración USB (ADB): $estadoAdb"
-        } catch (e: Exception) {
-            tvTelemetriaHardware?.text = "🧠 Parámetros de Hardware: No disponibles"
+            tvTelemetriaHardware.text =
+                "RAM libre      ${ramLibreMb}MB / ${ramTotalMb}MB\n" +
+                        "Temperatura    ${String.format(Locale.US, "%.1f", temperaturaC)} C\n" +
+                        "ADB            ${if (adbEnabled) "ACTIVO" else "INACTIVO"}"
+        } catch (_: Exception) {
+            tvGestionPantalla.text = "Pantalla       --"
+            tvGestionSonido.text = "Sonido         --"
+            tvTelemetriaHardware.text = "Hardware: informacion no disponible"
         }
 
-        // --- ACCIÓN PARA ABRIR MINI-APP WI-FI ---
-        tvTelemetriaRed?.setOnClickListener {
-            solicitarPermisosYMostrarWifi()
+        // SIM / OPERADOR
+        try {
+            val telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
+            val operadorName = telephonyManager.networkOperatorName?.takeIf { it.isNotBlank() } ?: "--"
+            val simState = when (telephonyManager.simState) {
+                TelephonyManager.SIM_STATE_READY -> "READY"
+                TelephonyManager.SIM_STATE_ABSENT -> "AUSENTE"
+                TelephonyManager.SIM_STATE_PIN_REQUIRED -> "PIN"
+                TelephonyManager.SIM_STATE_PUK_REQUIRED -> "PUK"
+                TelephonyManager.SIM_STATE_NETWORK_LOCKED -> "BLOQUEADA"
+                else -> "--"
+            }
+            tvTelemetriaMovil.text = "Operador $operadorName  |  SIM $simState"
+        } catch (_: Exception) {
+            tvTelemetriaMovil.text = "Operador / SIM: no disponible"
         }
 
-        // Guardar ubicación
-        btnGuardar?.setOnClickListener {
-            val nuevaUbicacion = etUbicacion?.text.toString().trim()
+        val ultimaSincro = prefs.getString("ultima_sincro", null)
+        tvUltimaSincro.text = "Ult. sincro    ${ultimaSincro ?: "--"}"
+        tvDiagPing.text = "Ping / salida a Internet: pendiente de test manual"
+
+        // -----------------------------------------------------------------
+        // ACCIONES - mismas funciones validadas de V62, sólo cambia la UI.
+        // -----------------------------------------------------------------
+        tvTelemetriaRed.setOnClickListener { solicitarPermisosYMostrarWifi() }
+        btnWifiDiag.setOnClickListener { solicitarPermisosYMostrarWifi() }
+
+        btnGuardar.setOnClickListener {
+            val nuevaUbicacion = etUbicacion.text.toString().trim()
             if (nuevaUbicacion.isNotEmpty()) {
                 prefs.edit().putString("ubicacion_dispositivo", nuevaUbicacion).apply()
-                AppLog.registrar("⚙️ Ubicación cambiada manualmente a: $nuevaUbicacion")
-                Toast.makeText(this, "✅ Ubicación guardada con éxito", Toast.LENGTH_LONG).show()
+                AppLog.registrar("IT: ubicacion cambiada manualmente a $nuevaUbicacion")
+                Toast.makeText(this, "Identificador guardado", Toast.LENGTH_LONG).show()
             } else {
-                Toast.makeText(this, "⚠️ La ubicación no puede estar vacía", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "La ubicacion no puede estar vacia", Toast.LENGTH_SHORT).show()
             }
         }
 
-        // Forzar Sincro con Excel real + Test Ping
-        btnTestSincro?.setOnClickListener {
-            Toast.makeText(this, "🔄 Sincronizando datos y ejecutando test de red...", Toast.LENGTH_SHORT).show()
-            AppLog.registrar("🔄 Forzada sincronización manual y test de red desde Panel IT")
+        btnTestSincro.setOnClickListener {
+            Toast.makeText(this, "Sincronizando datos y probando red...", Toast.LENGTH_SHORT).show()
+            AppLog.registrar("IT: sincronizacion manual + test de red")
+            tvDiagPing.text = "Ping / salida a Internet: comprobando..."
+            tvDiagPing.setTextColor(colorWarn)
 
             val pingClient = OkHttpClient.Builder().connectTimeout(3, TimeUnit.SECONDS).build()
             val pingRequest = Request.Builder().url("https://www.google.com").build()
@@ -280,122 +410,116 @@ class ItActivity : AppCompatActivity() {
 
             pingClient.newCall(pingRequest).enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
-                    AppLog.registrar("🏓 Test Conectividad: ❌ Sin salida a internet (${e.message})")
+                    AppLog.registrar("Test Conectividad: SIN SALIDA A INTERNET (${e.message})")
+                    runOnUiThread {
+                        tvDiagPing.text = "Ping / salida a Internet: ERROR"
+                        tvDiagPing.setTextColor(colorError)
+                    }
                 }
+
                 override fun onResponse(call: Call, response: Response) {
                     val latencia = System.currentTimeMillis() - inicioMs
-                    AppLog.registrar("🏓 Test Conectividad: ✅ OK (Latencia aproximada: ${latencia}ms)")
+                    AppLog.registrar("Test Conectividad: OK (${latencia}ms)")
                     response.close()
+                    runOnUiThread {
+                        tvDiagPing.text = "Ping / salida a Internet: OK  ${latencia}ms"
+                        tvDiagPing.setTextColor(if (latencia > 500) colorWarn else colorOk)
+                    }
                 }
             })
 
             val client = OkHttpClient()
             val request = Request.Builder().url(URL_GOOGLE_SHEETS_CSV).build()
-
             client.newCall(request).enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
-                    AppLog.registrar("❌ Error red sincronización IT: ${e.message}")
-                    runOnUiThread { Toast.makeText(this@ItActivity, "❌ Error de red al sincronizar", Toast.LENGTH_SHORT).show() }
+                    AppLog.registrar("Error red sincronizacion IT: ${e.message}")
+                    runOnUiThread {
+                        Toast.makeText(this@ItActivity, "Error de red al sincronizar", Toast.LENGTH_SHORT).show()
+                    }
                 }
 
                 override fun onResponse(call: Call, response: Response) {
                     val csvData = response.body?.string()
                     if (!response.isSuccessful || csvData.isNullOrEmpty()) {
-                        AppLog.registrar("❌ Error respuesta CSV vacía o incorrecta")
+                        AppLog.registrar("Error respuesta CSV vacia o incorrecta")
+                        response.close()
                         return
                     }
 
                     try {
                         val fechaActual = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault()).format(Date())
-                        prefs.edit().putString("csv_cache_data", csvData).putString("ultima_sincro", fechaActual).apply()
+                        prefs.edit()
+                            .putString("csv_cache_data", csvData)
+                            .putString("ultima_sincro", fechaActual)
+                            .apply()
 
                         runOnUiThread {
                             cargarSeccionesEnDesplegable(etUbicacion, prefs)
-                            Toast.makeText(this@ItActivity, "✨ ¡Sincronizado y red probada con éxito!", Toast.LENGTH_LONG).show()
+                            tvUltimaSincro.text = "Ult. sincro    $fechaActual"
+                            tvUltimaSincro.setTextColor(colorOk)
+                            Toast.makeText(this@ItActivity, "Sincronizacion completada", Toast.LENGTH_LONG).show()
                         }
-                        AppLog.registrar("✨ Sincronización manual completada y guardada en caché")
+                        AppLog.registrar("Sincronizacion manual completada y guardada en cache")
                     } catch (e: Exception) {
-                        AppLog.registrar("❌ Excepción guardando caché manual: ${e.message}")
+                        AppLog.registrar("Excepcion guardando cache manual: ${e.message}")
+                    } finally {
+                        response.close()
                     }
                 }
             })
         }
 
-        // Ver Logs en pantalla
-        btnVerLogsIt?.setOnClickListener {
-            mostrarDialogoLogsEnPantalla()
-        }
+        btnVerLogsIt.setOnClickListener { mostrarDialogoLogsEnPantalla() }
 
-        // Forzar OTA: utiliza EXACTAMENTE el mismo motor OTA de MainActivity.
-        // No duplicamos descarga ni PackageInstaller dentro del Panel IT.
-        btnForzarOTA?.setOnClickListener {
-            AppLog.registrar("🚀 OTA manual solicitada desde Panel IT")
-
-            Toast.makeText(
-                this,
-                "🚀 Abriendo motor OTA del Launcher...",
-                Toast.LENGTH_SHORT
-            ).show()
-
+        // OTA: se conserva el motor único de MainActivity. No se duplica PackageInstaller.
+        btnForzarOTA.setOnClickListener {
+            AppLog.registrar("OTA manual solicitada desde Panel IT V63")
+            Toast.makeText(this, "Abriendo motor OTA del Launcher...", Toast.LENGTH_SHORT).show()
             val otaIntent = Intent(this, MainActivity::class.java).apply {
                 putExtra(MainActivity.EXTRA_FORZAR_OTA, true)
                 addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             }
-
             startActivity(otaIntent)
             finish()
         }
 
-        // Purga de APKs
-        btnPurgarApks?.setOnClickListener {
-            purgarApksResiduales()
-        }
+        btnPurgarApks.setOnClickListener { purgarApksResiduales() }
 
-        // Modo Mantenimiento IT
-        btnModoMantenimiento?.setOnClickListener {
-            mostrarSelectorMantenimiento()
-        }
-
+        btnModoMantenimiento?.setOnClickListener { mostrarSelectorMantenimiento() }
         btnFinalizarMantenimiento?.setOnClickListener {
             AlertDialog.Builder(this)
-                .setTitle("🔒 Finalizar mantenimiento")
-                .setMessage("El terminal volverá inmediatamente a modo kiosco protegido.")
-                .setNegativeButton("Cancelar", null)
-                .setPositiveButton("BLOQUEAR AHORA") { _, _ ->
-                    solicitarFinMantenimiento()
-                }
+                .setTitle("Finalizar mantenimiento")
+                .setMessage("El terminal volvera inmediatamente al modo kiosco protegido.")
+                .setNegativeButton("CANCELAR", null)
+                .setPositiveButton("BLOQUEAR AHORA") { _, _ -> solicitarFinMantenimiento() }
                 .show()
         }
 
         actualizarEstadoMantenimientoUI()
-
-        // Cerrar panel
-        btnCerrarPanelIT?.setOnClickListener {
-            finish()
-        }
+        btnCerrarPanelIT.setOnClickListener { finish() }
     }
 
     private fun mostrarSelectorMantenimiento() {
         if (MaintenanceModeManager.estaActivo(this)) {
             Toast.makeText(
                 this,
-                "🟠 El Modo Mantenimiento ya está activo (${MaintenanceModeManager.descripcion(this)}).",
+                "Mantenimiento ya activo (${MaintenanceModeManager.descripcion(this)}).",
                 Toast.LENGTH_LONG
             ).show()
             return
         }
 
         val opciones = arrayOf(
-            "⏱️ 15 minutos",
-            "⏱️ 30 minutos",
-            "⏱️ 1 hora",
-            "♾️ Indefinido"
+            "15 minutos",
+            "30 minutos",
+            "1 hora",
+            "Indefinido"
         )
 
         var seleccion = 0
 
         AlertDialog.Builder(this)
-            .setTitle("🛠️ ¿Cuánto tiempo necesitas salir del kiosco?")
+            .setTitle("MODO MANTENIMIENTO // DURACION")
             .setSingleChoiceItems(opciones, seleccion) { _, which ->
                 seleccion = which
             }
@@ -413,7 +537,7 @@ class ItActivity : AppCompatActivity() {
 
     private fun confirmarMantenimientoIndefinido() {
         AlertDialog.Builder(this)
-            .setTitle("♾️ Mantenimiento indefinido")
+            .setTitle("MANTENIMIENTO INDEFINIDO")
             .setMessage(
                 "El terminal permanecerá en Android normal hasta que IT pulse FINALIZAR MANTENIMIENTO.\n\n" +
                         "Si el teléfono se reinicia, volverá automáticamente al modo kiosco protegido."
@@ -426,7 +550,7 @@ class ItActivity : AppCompatActivity() {
     }
 
     private fun solicitarMantenimiento(duracionMs: Long, etiqueta: String) {
-        AppLog.registrar("🛠️ IT solicita Modo Mantenimiento: $etiqueta")
+        AppLog.registrar("IT solicita Modo Mantenimiento: $etiqueta")
 
         val intent = Intent(this, MainActivity::class.java).apply {
             putExtra(MainActivity.EXTRA_MANTENIMIENTO_MS, duracionMs)
@@ -439,7 +563,7 @@ class ItActivity : AppCompatActivity() {
     }
 
     private fun solicitarFinMantenimiento() {
-        AppLog.registrar("🔒 IT solicita finalizar Modo Mantenimiento manualmente")
+        AppLog.registrar("IT solicita finalizar Modo Mantenimiento manualmente")
 
         val intent = Intent(this, MainActivity::class.java).apply {
             putExtra(MainActivity.EXTRA_FINALIZAR_MANTENIMIENTO, true)
@@ -455,21 +579,21 @@ class ItActivity : AppCompatActivity() {
 
         if (activo) {
             tvEstadoMantenimiento?.text =
-                "🟠 MANTENIMIENTO ACTIVO\n${MaintenanceModeManager.descripcion(this)}\n" +
-                        "Reiniciar el terminal restaurará el bloqueo."
-            tvEstadoMantenimiento?.setTextColor(Color.parseColor("#FFB300"))
+                "MANTENIMIENTO ACTIVO  //  ${MaintenanceModeManager.descripcion(this)}\n" +
+                        "Reinicio = retorno automatico a modo protegido"
+            tvEstadoMantenimiento?.setTextColor(Color.parseColor("#FFE58A"))
 
             btnModoMantenimiento?.isEnabled = false
-            btnModoMantenimiento?.text = "🛠️ MANTENIMIENTO ACTIVO"
+            btnModoMantenimiento?.text = "MANTENIMIENTO ACTIVO"
 
             btnFinalizarMantenimiento?.visibility = android.view.View.VISIBLE
         } else {
             tvEstadoMantenimiento?.text =
-                "🔒 MODO PRODUCCIÓN\nTerminal protegido por HOME persistente + Lock Task"
-            tvEstadoMantenimiento?.setTextColor(Color.parseColor("#4CAF50"))
+                "MODO PRODUCCION  //  HOME + LOCK TASK PROTEGIDOS"
+            tvEstadoMantenimiento?.setTextColor(Color.parseColor("#A7FFB1"))
 
             btnModoMantenimiento?.isEnabled = true
-            btnModoMantenimiento?.text = "🛠️ ACTIVAR MODO MANTENIMIENTO"
+            btnModoMantenimiento?.text = "ACTIVAR MANTENIMIENTO"
 
             btnFinalizarMantenimiento?.visibility = android.view.View.GONE
         }
@@ -512,12 +636,13 @@ class ItActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(50, 50, 50, 50)
             gravity = Gravity.CENTER
-            setBackgroundColor(Color.parseColor("#111111"))
+            setBackgroundColor(Color.parseColor("#061008"))
         }
 
         val tvInfo = TextView(this).apply {
-            setTextColor(Color.WHITE)
-            textSize = 16f
+            setTextColor(Color.parseColor("#B9F7C1"))
+            typeface = Typeface.MONOSPACE
+            textSize = 15f
             gravity = Gravity.CENTER
             setLineSpacing(0f, 1.2f)
         }
@@ -530,8 +655,9 @@ class ItActivity : AppCompatActivity() {
         }
 
         val tvEstado = TextView(this).apply {
-            setTextColor(Color.YELLOW)
-            textSize = 14f
+            setTextColor(Color.parseColor("#FFE58A"))
+            typeface = Typeface.MONOSPACE
+            textSize = 13f
             gravity = Gravity.CENTER
             text = "Analizando espectro de red..."
         }
@@ -541,7 +667,7 @@ class ItActivity : AppCompatActivity() {
         dialogView.addView(tvEstado)
 
         val dialog = AlertDialog.Builder(this)
-            .setTitle("📡 Diagnóstico Wi-Fi Kiosco")
+            .setTitle("DIAGNOSTICO WIFI // TGT")
             .setView(dialogView)
             .setPositiveButton("Cerrar", null)
             .create()
@@ -576,10 +702,10 @@ class ItActivity : AppCompatActivity() {
                         ipLocal = String.format("%d.%d.%d.%d", (ip and 0xff), (ip shr 8 and 0xff), (ip shr 16 and 0xff), (ip shr 24 and 0xff))
                     } catch (e: Exception) {}
 
-                    tvInfo.text = "📶 SSID: $ssid\n" +
-                            "🛜 Potencia (RSSI): $rssi dBm\n" +
-                            "⚡ Velocidad Enlace: $linkSpeed Mbps\n" +
-                            "🌐 IP Asignada: $ipLocal"
+                    tvInfo.text = "SSID        $ssid\n" +
+                            "RSSI        $rssi dBm\n" +
+                            "ENLACE      $linkSpeed Mbps\n" +
+                            "IP          $ipLocal"
 
                     barraSenal.progress = quality
                     tvEstado.text = "Estado: $estado"

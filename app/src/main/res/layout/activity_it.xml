@@ -1,286 +1,567 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/itRootScroll"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#121212"
-    android:fillViewport="true">
+    android:background="@drawable/bg_it_screen"
+    android:clipToPadding="false"
+    android:fillViewport="true"
+    android:paddingLeft="14dp"
+    android:paddingTop="16dp"
+    android:paddingRight="14dp"
+    android:paddingBottom="18dp">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:paddingLeft="20dp"
-        android:paddingTop="20dp"
-        android:paddingRight="20dp">
+        android:orientation="vertical">
 
-        <!-- CABECERA -->
+        <!-- CABECERA: margen superior protegido por WindowInsets en ItActivity -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="PANEL DE CONTROL IT"
-            android:textColor="#FFC107"
-            android:textSize="24sp"
-            android:textStyle="bold"
             android:gravity="center"
-            android:layout_marginBottom="5dp"/>
+            android:fontFamily="monospace"
+            android:letterSpacing="0.08"
+            android:text="PANEL IT"
+            android:textColor="#72FF86"
+            android:textSize="30sp"
+            android:textStyle="bold"
+            android:layout_marginTop="4dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:fontFamily="monospace"
+            android:text="LAUNCHER KIOSCO TGT // ADMIN TERMINAL"
+            android:textColor="#78C884"
+            android:textSize="11sp"
+            android:layout_marginTop="2dp" />
 
         <TextView
             android:id="@+id/tvEstadoKiosco"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="🔒 Kiosco Activo"
-            android:textColor="#4CAF50"
-            android:textSize="14sp"
+            android:background="@drawable/bg_it_status"
             android:gravity="center"
-            android:layout_marginBottom="20dp"/>
+            android:fontFamily="monospace"
+            android:padding="8dp"
+            android:text="● COMPROBANDO ESTADO..."
+            android:textColor="#A4FFAF"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:layout_marginTop="12dp"
+            android:layout_marginBottom="10dp" />
 
-        <!-- TARJETA DE TELEMETRÍA AVANZADA -->
+        <!-- BLOQUE SUPERIOR A DOS COLUMNAS -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:baselineAligned="false"
+            android:layout_marginBottom="10dp">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:background="@drawable/bg_it_card"
+                android:layout_marginEnd="5dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="monospace"
+                    android:text="SALUD DEL TERMINAL"
+                    android:textColor="#70FF83"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    android:layout_marginBottom="8dp" />
+
+                <TextView
+                    android:id="@+id/tvSaludAndroid"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="monospace"
+                    android:text="Android        --"
+                    android:textColor="#B9F7C1"
+                    android:textSize="11sp"
+                    android:layout_marginBottom="5dp" />
+
+                <TextView
+                    android:id="@+id/tvSaludDispositivo"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="monospace"
+                    android:text="Dispositivo    --"
+                    android:textColor="#B9F7C1"
+                    android:textSize="11sp"
+                    android:layout_marginBottom="5dp" />
+
+                <TextView
+                    android:id="@+id/tvSaludBateria"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="monospace"
+                    android:text="Bateria        --"
+                    android:textColor="#B9F7C1"
+                    android:textSize="11sp"
+                    android:layout_marginBottom="5dp" />
+
+                <TextView
+                    android:id="@+id/tvSaludRam"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="monospace"
+                    android:text="RAM            --"
+                    android:textColor="#B9F7C1"
+                    android:textSize="11sp"
+                    android:layout_marginBottom="5dp" />
+
+                <TextView
+                    android:id="@+id/tvTelemetriaAlmacenamiento"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="monospace"
+                    android:text="Almacenamiento --"
+                    android:textColor="#B9F7C1"
+                    android:textSize="11sp"
+                    android:layout_marginBottom="5dp" />
+
+                <TextView
+                    android:id="@+id/tvTelemetriaUptime"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="monospace"
+                    android:text="Uptime         --"
+                    android:textColor="#B9F7C1"
+                    android:textSize="11sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:background="@drawable/bg_it_card"
+                android:layout_marginStart="5dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="monospace"
+                    android:text="GESTION CENTRAL"
+                    android:textColor="#70FF83"
+                    android:textSize="13sp"
+                    android:textStyle="bold"
+                    android:layout_marginBottom="8dp" />
+
+                <TextView
+                    android:id="@+id/tvGestionDeviceOwner"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="monospace"
+                    android:text="Device Owner   --"
+                    android:textColor="#B9F7C1"
+                    android:textSize="11sp"
+                    android:layout_marginBottom="5dp" />
+
+                <TextView
+                    android:id="@+id/tvGestionKiosco"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="monospace"
+                    android:text="Kiosco         --"
+                    android:textColor="#B9F7C1"
+                    android:textSize="11sp"
+                    android:layout_marginBottom="5dp" />
+
+                <TextView
+                    android:id="@+id/tvGestionPoliticas"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="monospace"
+                    android:text="Politicas      --"
+                    android:textColor="#B9F7C1"
+                    android:textSize="11sp"
+                    android:layout_marginBottom="5dp" />
+
+                <TextView
+                    android:id="@+id/tvGestionConectividad"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="monospace"
+                    android:text="Conectividad   --"
+                    android:textColor="#B9F7C1"
+                    android:textSize="11sp"
+                    android:layout_marginBottom="5dp" />
+
+                <TextView
+                    android:id="@+id/tvGestionPantalla"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="monospace"
+                    android:text="Pantalla       --"
+                    android:textColor="#B9F7C1"
+                    android:textSize="11sp"
+                    android:layout_marginBottom="5dp" />
+
+                <TextView
+                    android:id="@+id/tvGestionSonido"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="monospace"
+                    android:text="Sonido         --"
+                    android:textColor="#B9F7C1"
+                    android:textSize="11sp"
+                    android:layout_marginBottom="5dp" />
+
+                <TextView
+                    android:id="@+id/tvUltimaSincro"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="monospace"
+                    android:text="Ult. sincro    --"
+                    android:textColor="#B9F7C1"
+                    android:textSize="11sp"
+                    android:layout_marginBottom="8dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnTestSincro"
+                    android:layout_width="match_parent"
+                    android:layout_height="44dp"
+                    android:fontFamily="monospace"
+                    android:text="SINCRONIZAR"
+                    android:textColor="#A7FFB1"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:backgroundTint="#07170B"
+                    app:cornerRadius="7dp"
+                    app:strokeColor="#4FE265"
+                    app:strokeWidth="1dp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- TERMINAL / SECCION -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:background="#1E1E1E"
-            android:padding="15dp"
-            android:layout_marginBottom="20dp"
-            android:elevation="4dp">
+            android:background="@drawable/bg_it_card_dim"
+            android:padding="12dp"
+            android:layout_marginBottom="10dp">
 
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="⚙️ Salud y Parámetros del Sistema"
-                android:textColor="#FFFFFF"
-                android:textSize="18sp"
+                android:fontFamily="monospace"
+                android:text="IDENTIFICADOR DE TERMINAL"
+                android:textColor="#70FF83"
+                android:textSize="12sp"
                 android:textStyle="bold"
-                android:layout_marginBottom="10dp"/>
+                android:layout_marginBottom="7dp" />
+
+            <AutoCompleteTextView
+                android:id="@+id/etUbicacion"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:background="@drawable/bg_it_input"
+                android:clickable="true"
+                android:cursorVisible="false"
+                android:focusable="false"
+                android:focusableInTouchMode="false"
+                android:fontFamily="monospace"
+                android:hint="Selecciona seccion..."
+                android:textColor="#B9F7C1"
+                android:textColorHint="#56845D"
+                android:textSize="12sp"
+                android:layout_marginBottom="8dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnGuardarConfig"
+                android:layout_width="match_parent"
+                android:layout_height="44dp"
+                android:fontFamily="monospace"
+                android:text="GUARDAR IDENTIFICADOR"
+                android:textColor="#A7FFB1"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:backgroundTint="#07170B"
+                app:cornerRadius="7dp"
+                app:strokeColor="#4FE265"
+                app:strokeWidth="1dp" />
+        </LinearLayout>
+
+        <!-- OTA -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/bg_it_card"
+            android:layout_marginBottom="10dp">
 
             <TextView
-                android:id="@+id/tvTelemetriaUptime"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="⏱️ Tiempo activo: Calculando..."
-                android:textColor="#B0BEC5"
-                android:layout_marginBottom="5dp"/>
-
-            <TextView
-                android:id="@+id/tvTelemetriaAlmacenamiento"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="💾 Almacenamiento Libre: Calculando..."
-                android:textColor="#B0BEC5"
-                android:layout_marginBottom="5dp"/>
-
-            <TextView
-                android:id="@+id/tvTelemetriaRed"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="📶 Wi-Fi e IP: Calculando..."
-                android:textColor="#00E5FF"
-                android:layout_marginBottom="5dp"/>
-
-            <TextView
-                android:id="@+id/tvTelemetriaMovil"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="📱 Operador y Datos: Calculando..."
-                android:textColor="#4CAF50"
-                android:layout_marginBottom="5dp"/>
-
-            <TextView
-                android:id="@+id/tvTelemetriaHardware"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="🧠 RAM, Volúmenes y ADB: Calculando..."
-                android:textColor="#FFC107"
-                android:layout_marginBottom="5dp"/>
+                android:fontFamily="monospace"
+                android:text="ACTUALIZACIONES OTA"
+                android:textColor="#70FF83"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="8dp" />
 
             <TextView
                 android:id="@+id/tvVersionApp"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="📱 Versión: Calculando..."
-                android:textColor="#B0BEC5"
-                android:layout_marginBottom="8dp"/>
+                android:fontFamily="monospace"
+                android:text="Version instalada: --"
+                android:textColor="#C1F8C8"
+                android:textSize="12sp"
+                android:layout_marginBottom="5dp" />
 
             <TextView
                 android:id="@+id/tvEstadoOTA"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="🔄 OTA: Calculando..."
-                android:textColor="#80CBC4"
-                android:textSize="13sp"
-                android:lineSpacingExtra="2dp"/>
-        </LinearLayout>
+                android:fontFamily="monospace"
+                android:lineSpacingExtra="2dp"
+                android:text="OTA automatica: --"
+                android:textColor="#8DEB9A"
+                android:textSize="11sp"
+                android:layout_marginBottom="9dp" />
 
-        <!-- TARJETA DE CONFIGURACIÓN -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:background="#1E1E1E"
-            android:padding="15dp"
-            android:layout_marginBottom="20dp">
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="📍 Identificador de Terminal (Sección)"
-                android:textColor="#FFFFFF"
-                android:textSize="16sp"
-                android:textStyle="bold"
-                android:layout_marginBottom="10dp"/>
-
-            <AutoCompleteTextView
-                android:id="@+id/etUbicacion"
-                android:layout_width="match_parent"
-                android:layout_height="50dp"
-                android:background="#2C2C2C"
-                android:textColor="#FFFFFF"
-                android:padding="10dp"
-                android:hint="Pulsa para seleccionar sección..."
-                android:textColorHint="#757575"
-                android:focusable="false"
-                android:focusableInTouchMode="false"
-                android:clickable="true"
-                android:cursorVisible="false"
-                android:layout_marginBottom="10dp"/>
-
-            <Button
-                android:id="@+id/btnGuardarConfig"
-                android:layout_width="match_parent"
-                android:layout_height="55dp"
-                android:text="💾 GUARDAR IDENTIFICADOR"
-                android:backgroundTint="#0288D1"
-                android:textColor="#FFFFFF"
-                android:textStyle="bold"/>
-        </LinearLayout>
-
-        <!-- TARJETA DE ACCIONES RÁPIDAS -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:background="#1E1E1E"
-            android:padding="15dp"
-            android:layout_marginBottom="20dp">
-
-            <TextView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="⚡ Acciones de Mantenimiento"
-                android:textColor="#FFFFFF"
-                android:textSize="16sp"
-                android:textStyle="bold"
-                android:layout_marginBottom="10dp"/>
-
-            <Button
-                android:id="@+id/btnTestSincro"
-                android:layout_width="match_parent"
-                android:layout_height="55dp"
-                android:text="🔄 FORZAR SINCRO CSV (EXCEL)"
-                android:backgroundTint="#43A047"
-                android:textColor="#FFFFFF"
-                android:textStyle="bold"
-                android:layout_marginBottom="10dp"/>
-
-            <Button
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnForzarOTA"
                 android:layout_width="match_parent"
-                android:layout_height="55dp"
-                android:text="🚀 BUSCAR ACTUALIZACIÓN OTA"
-                android:backgroundTint="#F57C00"
-                android:textColor="#FFFFFF"
+                android:layout_height="46dp"
+                android:fontFamily="monospace"
+                android:text="BUSCAR ACTUALIZACION OTA"
+                android:textColor="#B7FFBF"
+                android:textSize="12sp"
                 android:textStyle="bold"
-                android:layout_marginBottom="10dp"/>
-
-            <Button
-                android:id="@+id/btnPurgarApks"
-                android:layout_width="match_parent"
-                android:layout_height="55dp"
-                android:text="🧹 PURGAR APKs RESIDUALES"
-                android:backgroundTint="#D97706"
-                android:textColor="#FFFFFF"
-                android:textStyle="bold"
-                android:layout_marginBottom="10dp"/>
-
-            <Button
-                android:id="@+id/btnVerLogsIt"
-                android:layout_width="match_parent"
-                android:layout_height="55dp"
-                android:text="📋 VER REGISTROS (LOGS PERSISTENTES)"
-                android:backgroundTint="#5E35B1"
-                android:textColor="#FFFFFF"
-                android:textStyle="bold"/>
+                android:backgroundTint="#0A1C0D"
+                app:cornerRadius="7dp"
+                app:strokeColor="#67FF7A"
+                app:strokeWidth="1dp" />
         </LinearLayout>
 
-        <!-- MODO MANTENIMIENTO IT -->
+        <!-- MANTENIMIENTO -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:background="#1E1E1E"
-            android:padding="15dp"
-            android:layout_marginBottom="20dp">
+            android:background="@drawable/bg_it_card"
+            android:layout_marginBottom="10dp">
 
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="🛠️ Modo Mantenimiento IT"
-                android:textColor="#FFFFFF"
-                android:textSize="16sp"
+                android:fontFamily="monospace"
+                android:text="MODO MANTENIMIENTO"
+                android:textColor="#70FF83"
+                android:textSize="14sp"
                 android:textStyle="bold"
-                android:layout_marginBottom="10dp"/>
+                android:layout_marginBottom="6dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:text="Ventanas disponibles: 15 min  ·  30 min  ·  1 hora  ·  indefinido"
+                android:textColor="#6EB97A"
+                android:textSize="10sp"
+                android:layout_marginBottom="8dp" />
 
             <TextView
                 android:id="@+id/tvEstadoMantenimiento"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="🔒 MODO PRODUCCIÓN"
-                android:textColor="#4CAF50"
-                android:textSize="14sp"
+                android:background="@drawable/bg_it_status"
+                android:fontFamily="monospace"
                 android:gravity="center"
-                android:padding="10dp"
-                android:layout_marginBottom="10dp"/>
+                android:padding="9dp"
+                android:text="MODO PRODUCCION"
+                android:textColor="#A7FFB1"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="8dp" />
 
-            <Button
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnModoMantenimiento"
                 android:layout_width="match_parent"
-                android:layout_height="55dp"
-                android:text="🛠️ ACTIVAR MODO MANTENIMIENTO"
-                android:backgroundTint="#F57C00"
-                android:textColor="#FFFFFF"
+                android:layout_height="48dp"
+                android:fontFamily="monospace"
+                android:text="ACTIVAR MANTENIMIENTO"
+                android:textColor="#E1F8A7"
+                android:textSize="12sp"
                 android:textStyle="bold"
-                android:layout_marginBottom="10dp"/>
+                android:backgroundTint="#1A2109"
+                app:cornerRadius="7dp"
+                app:strokeColor="#D7F26B"
+                app:strokeWidth="1dp" />
 
-            <Button
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnFinalizarMantenimiento"
                 android:layout_width="match_parent"
-                android:layout_height="55dp"
-                android:text="🔒 FINALIZAR MANTENIMIENTO AHORA"
-                android:backgroundTint="#C8102E"
-                android:textColor="#FFFFFF"
+                android:layout_height="48dp"
+                android:fontFamily="monospace"
+                android:text="FINALIZAR MANTENIMIENTO AHORA"
+                android:textColor="#FFD6D6"
+                android:textSize="11sp"
                 android:textStyle="bold"
-                android:visibility="gone"/>
+                android:visibility="gone"
+                android:backgroundTint="#27100F"
+                android:layout_marginTop="8dp"
+                app:cornerRadius="7dp"
+                app:strokeColor="#FF6B6B"
+                app:strokeWidth="1dp" />
         </LinearLayout>
 
-        <Button
+        <!-- DIAGNOSTICO -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/bg_it_card"
+            android:layout_marginBottom="10dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:text="DIAGNOSTICO"
+                android:textColor="#70FF83"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:id="@+id/tvDiagPing"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:text="Ping / salida a Internet: --"
+                android:textColor="#B9F7C1"
+                android:textSize="11sp"
+                android:layout_marginBottom="5dp" />
+
+            <TextView
+                android:id="@+id/tvTelemetriaRed"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:text="Wi-Fi / IP: calculando..."
+                android:textColor="#B9F7C1"
+                android:textSize="11sp"
+                android:layout_marginBottom="5dp" />
+
+            <TextView
+                android:id="@+id/tvTelemetriaHardware"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:text="Hardware: calculando..."
+                android:textColor="#B9F7C1"
+                android:textSize="11sp"
+                android:layout_marginBottom="5dp" />
+
+            <TextView
+                android:id="@+id/tvTelemetriaMovil"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:text="SIM / operador: calculando..."
+                android:textColor="#78C884"
+                android:textSize="10sp"
+                android:layout_marginBottom="9dp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:baselineAligned="false">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnVerLogsIt"
+                    android:layout_width="0dp"
+                    android:layout_height="46dp"
+                    android:layout_weight="1"
+                    android:layout_marginEnd="4dp"
+                    android:fontFamily="monospace"
+                    android:text="VER LOGS"
+                    android:textColor="#A7FFB1"
+                    android:textSize="10sp"
+                    android:textStyle="bold"
+                    android:backgroundTint="#07170B"
+                    app:cornerRadius="7dp"
+                    app:strokeColor="#4FE265"
+                    app:strokeWidth="1dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnWifiDiag"
+                    android:layout_width="0dp"
+                    android:layout_height="46dp"
+                    android:layout_weight="1"
+                    android:layout_marginStart="4dp"
+                    android:layout_marginEnd="4dp"
+                    android:fontFamily="monospace"
+                    android:text="WIFI"
+                    android:textColor="#A7FFB1"
+                    android:textSize="10sp"
+                    android:textStyle="bold"
+                    android:backgroundTint="#07170B"
+                    app:cornerRadius="7dp"
+                    app:strokeColor="#4FE265"
+                    app:strokeWidth="1dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnPurgarApks"
+                    android:layout_width="0dp"
+                    android:layout_height="46dp"
+                    android:layout_weight="1"
+                    android:layout_marginStart="4dp"
+                    android:fontFamily="monospace"
+                    android:text="PURGAR APK"
+                    android:textColor="#FFE59A"
+                    android:textSize="10sp"
+                    android:textStyle="bold"
+                    android:backgroundTint="#211B08"
+                    app:cornerRadius="7dp"
+                    app:strokeColor="#D7B94B"
+                    app:strokeWidth="1dp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btnCerrarPanelIT"
             android:layout_width="match_parent"
-            android:layout_height="55dp"
-            android:text="❌ CERRAR PANEL IT"
-            android:backgroundTint="#C8102E"
-            android:textColor="#FFFFFF"
+            android:layout_height="48dp"
+            android:fontFamily="monospace"
+            android:text="CERRAR PANEL IT"
+            android:textColor="#FFD6D6"
+            android:textSize="11sp"
             android:textStyle="bold"
-            android:layout_marginBottom="30dp"/>
+            android:backgroundTint="#23100F"
+            app:cornerRadius="7dp"
+            app:strokeColor="#FF6B6B"
+            app:strokeWidth="1dp"
+            android:layout_marginBottom="18dp" />
 
+        <!-- FOOTER: queda separado de la barra de navegación por WindowInsets -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Terminal Operations\nDiseñado y desarrollado por Marco Carpi\nMADECEM"
-            android:textColor="#757575"
-            android:textSize="12sp"
             android:gravity="center"
-            android:textStyle="italic"
-            android:layout_marginBottom="20dp"/>
+            android:fontFamily="monospace"
+            android:letterSpacing="0.04"
+            android:text="—  TGT // IT TERMINAL  —\n\nCreado por Marco Carpi\nMadecem.com"
+            android:textColor="#79D487"
+            android:textSize="11sp"
+            android:layout_marginBottom="8dp" />
 
     </LinearLayout>
 </ScrollView>
