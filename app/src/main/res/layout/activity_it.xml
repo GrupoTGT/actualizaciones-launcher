@@ -3,15 +3,14 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="#121212"
-    android:clipToPadding="false"
-    android:paddingTop="30dp"
-    android:paddingBottom="40dp">
+    android:fillViewport="true">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
         android:paddingLeft="20dp"
+        android:paddingTop="20dp"
         android:paddingRight="20dp">
 
         <!-- CABECERA -->
@@ -70,7 +69,6 @@
                 android:textColor="#B0BEC5"
                 android:layout_marginBottom="5dp"/>
 
-            <!-- 📶 CAMPO DE WI-FI E IP LOCAL -->
             <TextView
                 android:id="@+id/tvTelemetriaRed"
                 android:layout_width="match_parent"
@@ -79,7 +77,6 @@
                 android:textColor="#00E5FF"
                 android:layout_marginBottom="5dp"/>
 
-            <!-- 📱 CAMPO DE OPERADOR Y DATOS MÓVILES -->
             <TextView
                 android:id="@+id/tvTelemetriaMovil"
                 android:layout_width="match_parent"
@@ -88,7 +85,6 @@
                 android:textColor="#4CAF50"
                 android:layout_marginBottom="5dp"/>
 
-            <!-- 🧠 CAMPO DE RAM, VOLÚMENES, ADB Y TEMPERATURA -->
             <TextView
                 android:id="@+id/tvTelemetriaHardware"
                 android:layout_width="match_parent"
@@ -102,7 +98,17 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="📱 Versión: Calculando..."
-                android:textColor="#B0BEC5"/>
+                android:textColor="#B0BEC5"
+                android:layout_marginBottom="8dp"/>
+
+            <TextView
+                android:id="@+id/tvEstadoOTA"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="🔄 OTA: Calculando..."
+                android:textColor="#80CBC4"
+                android:textSize="13sp"
+                android:lineSpacingExtra="2dp"/>
         </LinearLayout>
 
         <!-- TARJETA DE CONFIGURACIÓN -->
@@ -206,15 +212,55 @@
                 android:textStyle="bold"/>
         </LinearLayout>
 
-        <!-- CONTROLES AVANZADOS -->
-        <Button
-            android:id="@+id/btnAbrirAjustesAndroid"
+        <!-- MODO MANTENIMIENTO IT -->
+        <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="55dp"
-            android:text="⚙️ ABRIR AJUSTES DE ANDROID"
-            android:backgroundTint="#424242"
-            android:textColor="#FFFFFF"
-            android:layout_marginBottom="10dp"/>
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="#1E1E1E"
+            android:padding="15dp"
+            android:layout_marginBottom="20dp">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="🛠️ Modo Mantenimiento IT"
+                android:textColor="#FFFFFF"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="10dp"/>
+
+            <TextView
+                android:id="@+id/tvEstadoMantenimiento"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="🔒 MODO PRODUCCIÓN"
+                android:textColor="#4CAF50"
+                android:textSize="14sp"
+                android:gravity="center"
+                android:padding="10dp"
+                android:layout_marginBottom="10dp"/>
+
+            <Button
+                android:id="@+id/btnModoMantenimiento"
+                android:layout_width="match_parent"
+                android:layout_height="55dp"
+                android:text="🛠️ ACTIVAR MODO MANTENIMIENTO"
+                android:backgroundTint="#F57C00"
+                android:textColor="#FFFFFF"
+                android:textStyle="bold"
+                android:layout_marginBottom="10dp"/>
+
+            <Button
+                android:id="@+id/btnFinalizarMantenimiento"
+                android:layout_width="match_parent"
+                android:layout_height="55dp"
+                android:text="🔒 FINALIZAR MANTENIMIENTO AHORA"
+                android:backgroundTint="#C8102E"
+                android:textColor="#FFFFFF"
+                android:textStyle="bold"
+                android:visibility="gone"/>
+        </LinearLayout>
 
         <Button
             android:id="@+id/btnCerrarPanelIT"
@@ -226,7 +272,6 @@
             android:textStyle="bold"
             android:layout_marginBottom="30dp"/>
 
-        <!-- FOOTER FIRMA CREADOR -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

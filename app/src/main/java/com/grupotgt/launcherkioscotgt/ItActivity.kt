@@ -2,6 +2,7 @@ package com.grupotgt.launcherkioscotgt
 
 import android.Manifest
 import android.app.ActivityManager
+import android.app.admin.DevicePolicyManager
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -42,7 +43,6 @@ import okhttp3.Callback
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
-import org.json.JSONObject
 import java.io.File
 import java.io.IOException
 import java.net.NetworkInterface
@@ -55,6 +55,18 @@ class ItActivity : AppCompatActivity() {
 
     private val URL_GOOGLE_SHEETS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSye0TO9CYH8xXSPy-rCNDOO4UjiNdmp32SiOWLwxsUPI25ZW9rHW44JlAPn38_4vVpJK5Pw6tu5Ct0/pub?output=csv"
 
+    private val handlerMantenimiento = Handler(Looper.getMainLooper())
+    private var tvEstadoMantenimiento: TextView? = null
+    private var btnModoMantenimiento: Button? = null
+    private var btnFinalizarMantenimiento: Button? = null
+
+    private val runnableEstadoMantenimiento = object : Runnable {
+        override fun run() {
+            actualizarEstadoMantenimientoUI()
+            handlerMantenimiento.postDelayed(this, 1000L)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_it)
@@ -65,10 +77,13 @@ class ItActivity : AppCompatActivity() {
         val btnVerLogsIt = findViewById<Button>(R.id.btnVerLogsIt)
         val btnForzarOTA = findViewById<Button>(R.id.btnForzarOTA)
         val btnPurgarApks = findViewById<Button>(R.id.btnPurgarApks)
-        val btnAbrirAjustesAndroid = findViewById<Button>(R.id.btnAbrirAjustesAndroid)
         val btnCerrarPanelIT = findViewById<Button>(R.id.btnCerrarPanelIT)
+        tvEstadoMantenimiento = findViewById(R.id.tvEstadoMantenimiento)
+        btnModoMantenimiento = findViewById(R.id.btnModoMantenimiento)
+        btnFinalizarMantenimiento = findViewById(R.id.btnFinalizarMantenimiento)
         val tvEstadoKiosco = findViewById<TextView>(R.id.tvEstadoKiosco)
         val tvVersionApp = findViewById<TextView>(R.id.tvVersionApp)
+        val tvEstadoOTA = findViewById<TextView>(R.id.tvEstadoOTA)
 
         val tvTelemetriaUptime = findViewById<TextView>(R.id.tvTelemetriaUptime)
         val tvTelemetriaAlmacenamiento = findViewById<TextView>(R.id.tvTelemetriaAlmacenamiento)
@@ -82,7 +97,7 @@ class ItActivity : AppCompatActivity() {
 
         cargarSeccionesEnDesplegable(etUbicacion, prefs)
 
-        // VERSIÓN DE LA APP Y DE ANDROID
+        // VERSIÓN DE LA APP, ANDROID Y AUDITORÍA DE ACTUALIZACIÓN
         try {
             val pInfo = packageManager.getPackageInfo(packageName, 0)
             val versionName = pInfo.versionName ?: "1.0"
@@ -94,12 +109,58 @@ class ItActivity : AppCompatActivity() {
             }
             val androidVer = Build.VERSION.RELEASE
             val sdkVer = Build.VERSION.SDK_INT
+            val fechaActualizacion = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault())
+                .format(Date(pInfo.lastUpdateTime))
+
+            val instalador = try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    packageManager.getInstallSourceInfo(packageName).installingPackageName ?: "Android / sistema"
+                } else {
+                    @Suppress("DEPRECATION")
+                    packageManager.getInstallerPackageName(packageName) ?: "Android / sistema"
+                }
+            } catch (_: Exception) {
+                "No disponible"
+            }
+
             tvVersionApp?.text = "📱 App: v$versionName ($versionCode) | Android: $sdkVer (v$androidVer)"
+            tvEstadoOTA?.text =
+                "🔄 OTA automática: ACTIVA · comprobación cada 2 min\n" +
+                        "🕒 Última instalación/actualización: $fechaActualizacion\n" +
+                        "📦 Origen registrado por Android: $instalador"
         } catch (e: Exception) {
             tvVersionApp?.text = "📱 Versión instalada: Desconocida"
+            tvEstadoOTA?.text = "⚠️ No se pudo leer el estado de actualización"
         }
 
-        tvEstadoKiosco?.text = "📦 Paquete: $packageName\n🔒 Estado: Kiosco Blindado Activo"
+        try {
+            val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+            val esDeviceOwner = dpm.isDeviceOwnerApp(packageName)
+
+            val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            val lockTaskActivo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                activityManager.lockTaskModeState != ActivityManager.LOCK_TASK_MODE_NONE
+            } else {
+                @Suppress("DEPRECATION")
+                activityManager.isInLockTaskMode
+            }
+
+            val puedeSolicitarApk = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                packageManager.canRequestPackageInstalls()
+            } else {
+                true
+            }
+
+            val mantenimientoActivo = MaintenanceModeManager.estaActivo(this)
+
+            tvEstadoKiosco?.text =
+                "📦 Paquete: $packageName\n" +
+                        "🔒 Kiosco: ${if (mantenimientoActivo) "🟠 SUSPENDIDO POR IT" else if (lockTaskActivo) "✅ ACTIVO" else "⚠️ INACTIVO"}\n" +
+                        "🛡️ Device Owner: ${if (esDeviceOwner) "✅ SÍ" else "❌ NO"}\n" +
+                        "📲 Instalación APK: ${if (puedeSolicitarApk || esDeviceOwner) "✅ PREPARADA" else "⚠️ REQUIERE REVISIÓN"}"
+        } catch (e: Exception) {
+            tvEstadoKiosco?.text = "📦 Paquete: $packageName\n⚠️ No se pudo completar el diagnóstico IT"
+        }
 
         // TIEMPO ACTIVO (UPTIME)
         val uptimeMillis = SystemClock.elapsedRealtime()
@@ -265,57 +326,24 @@ class ItActivity : AppCompatActivity() {
             mostrarDialogoLogsEnPantalla()
         }
 
-        // Forzar OTA
+        // Forzar OTA: utiliza EXACTAMENTE el mismo motor OTA de MainActivity.
+        // No duplicamos descarga ni PackageInstaller dentro del Panel IT.
         btnForzarOTA?.setOnClickListener {
-            Toast.makeText(this, "🚀 Comprobando versión en GitHub...", Toast.LENGTH_SHORT).show()
-            AppLog.registrar("🚀 Comprobación manual de OTA iniciada desde Panel IT")
+            AppLog.registrar("🚀 OTA manual solicitada desde Panel IT")
 
-            val client = OkHttpClient.Builder()
-                .followRedirects(true)
-                .followSslRedirects(true)
-                .build()
+            Toast.makeText(
+                this,
+                "🚀 Abriendo motor OTA del Launcher...",
+                Toast.LENGTH_SHORT
+            ).show()
 
-            val request = Request.Builder().url("https://grupotgt.github.io/actualizaciones-launcher/version.json").build()
+            val otaIntent = Intent(this, MainActivity::class.java).apply {
+                putExtra(MainActivity.EXTRA_FORZAR_OTA, true)
+                addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            }
 
-            client.newCall(request).enqueue(object : Callback {
-                override fun onFailure(call: Call, e: IOException) {
-                    AppLog.registrar("❌ OTA Error Red JSON: ${e.message}")
-                    runOnUiThread { Toast.makeText(this@ItActivity, "❌ Error de red al buscar OTA", Toast.LENGTH_SHORT).show() }
-                }
-
-                override fun onResponse(call: Call, response: Response) {
-                    try {
-                        val jsonStr = response.body?.string()
-                        if (!response.isSuccessful || jsonStr.isNullOrEmpty()) {
-                            AppLog.registrar("❌ OTA JSON Falló: HTTP ${response.code}")
-                            return
-                        }
-
-                        val jsonObject = JSONObject(jsonStr)
-                        val versionNube = jsonObject.getInt("versionCode")
-
-                        val pInfo = packageManager.getPackageInfo(packageName, 0)
-                        val versionActual = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                            pInfo.longVersionCode.toInt()
-                        } else {
-                            @Suppress("DEPRECATION")
-                            pInfo.versionCode
-                        }
-
-                        AppLog.registrar("ℹ️ OTA Check Panel IT -> Local: $versionActual | Nube: $versionNube")
-
-                        runOnUiThread {
-                            if (versionNube > versionActual) {
-                                Toast.makeText(this@ItActivity, "✨ ¡Actualización encontrada en nube (v$versionNube)!", Toast.LENGTH_LONG).show()
-                            } else {
-                                Toast.makeText(this@ItActivity, "✅ Estás al día (Local: $versionActual, Nube: $versionNube)", Toast.LENGTH_LONG).show()
-                            }
-                        }
-                    } catch (e: Exception) {
-                        AppLog.registrar("❌ Excepción leyendo JSON OTA en IT: ${e.message}")
-                    }
-                }
-            })
+            startActivity(otaIntent)
+            finish()
         }
 
         // Purga de APKs
@@ -323,19 +351,139 @@ class ItActivity : AppCompatActivity() {
             purgarApksResiduales()
         }
 
-        // Ajustes de Android
-        btnAbrirAjustesAndroid?.setOnClickListener {
-            try {
-                stopLockTask()
-            } catch (e: Exception) {}
-            startActivity(Intent(Settings.ACTION_SETTINGS))
-            finish()
+        // Modo Mantenimiento IT
+        btnModoMantenimiento?.setOnClickListener {
+            mostrarSelectorMantenimiento()
         }
+
+        btnFinalizarMantenimiento?.setOnClickListener {
+            AlertDialog.Builder(this)
+                .setTitle("🔒 Finalizar mantenimiento")
+                .setMessage("El terminal volverá inmediatamente a modo kiosco protegido.")
+                .setNegativeButton("Cancelar", null)
+                .setPositiveButton("BLOQUEAR AHORA") { _, _ ->
+                    solicitarFinMantenimiento()
+                }
+                .show()
+        }
+
+        actualizarEstadoMantenimientoUI()
 
         // Cerrar panel
         btnCerrarPanelIT?.setOnClickListener {
             finish()
         }
+    }
+
+    private fun mostrarSelectorMantenimiento() {
+        if (MaintenanceModeManager.estaActivo(this)) {
+            Toast.makeText(
+                this,
+                "🟠 El Modo Mantenimiento ya está activo (${MaintenanceModeManager.descripcion(this)}).",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+
+        val opciones = arrayOf(
+            "⏱️ 15 minutos",
+            "⏱️ 30 minutos",
+            "⏱️ 1 hora",
+            "♾️ Indefinido"
+        )
+
+        var seleccion = 0
+
+        AlertDialog.Builder(this)
+            .setTitle("🛠️ ¿Cuánto tiempo necesitas salir del kiosco?")
+            .setSingleChoiceItems(opciones, seleccion) { _, which ->
+                seleccion = which
+            }
+            .setNegativeButton("CANCELAR", null)
+            .setPositiveButton("ACTIVAR") { _, _ ->
+                when (seleccion) {
+                    0 -> solicitarMantenimiento(15L * 60L * 1000L, "15 minutos")
+                    1 -> solicitarMantenimiento(30L * 60L * 1000L, "30 minutos")
+                    2 -> solicitarMantenimiento(60L * 60L * 1000L, "1 hora")
+                    3 -> confirmarMantenimientoIndefinido()
+                }
+            }
+            .show()
+    }
+
+    private fun confirmarMantenimientoIndefinido() {
+        AlertDialog.Builder(this)
+            .setTitle("♾️ Mantenimiento indefinido")
+            .setMessage(
+                "El terminal permanecerá en Android normal hasta que IT pulse FINALIZAR MANTENIMIENTO.\n\n" +
+                        "Si el teléfono se reinicia, volverá automáticamente al modo kiosco protegido."
+            )
+            .setNegativeButton("Cancelar", null)
+            .setPositiveButton("ACTIVAR INDEFINIDO") { _, _ ->
+                solicitarMantenimiento(-1L, "indefinido")
+            }
+            .show()
+    }
+
+    private fun solicitarMantenimiento(duracionMs: Long, etiqueta: String) {
+        AppLog.registrar("🛠️ IT solicita Modo Mantenimiento: $etiqueta")
+
+        val intent = Intent(this, MainActivity::class.java).apply {
+            putExtra(MainActivity.EXTRA_MANTENIMIENTO_MS, duracionMs)
+            putExtra(MainActivity.EXTRA_ABRIR_AJUSTES, false)
+            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        }
+
+        startActivity(intent)
+        finish()
+    }
+
+    private fun solicitarFinMantenimiento() {
+        AppLog.registrar("🔒 IT solicita finalizar Modo Mantenimiento manualmente")
+
+        val intent = Intent(this, MainActivity::class.java).apply {
+            putExtra(MainActivity.EXTRA_FINALIZAR_MANTENIMIENTO, true)
+            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        }
+
+        startActivity(intent)
+        finish()
+    }
+
+    private fun actualizarEstadoMantenimientoUI() {
+        val activo = MaintenanceModeManager.estaActivo(this)
+
+        if (activo) {
+            tvEstadoMantenimiento?.text =
+                "🟠 MANTENIMIENTO ACTIVO\n${MaintenanceModeManager.descripcion(this)}\n" +
+                        "Reiniciar el terminal restaurará el bloqueo."
+            tvEstadoMantenimiento?.setTextColor(Color.parseColor("#FFB300"))
+
+            btnModoMantenimiento?.isEnabled = false
+            btnModoMantenimiento?.text = "🛠️ MANTENIMIENTO ACTIVO"
+
+            btnFinalizarMantenimiento?.visibility = android.view.View.VISIBLE
+        } else {
+            tvEstadoMantenimiento?.text =
+                "🔒 MODO PRODUCCIÓN\nTerminal protegido por HOME persistente + Lock Task"
+            tvEstadoMantenimiento?.setTextColor(Color.parseColor("#4CAF50"))
+
+            btnModoMantenimiento?.isEnabled = true
+            btnModoMantenimiento?.text = "🛠️ ACTIVAR MODO MANTENIMIENTO"
+
+            btnFinalizarMantenimiento?.visibility = android.view.View.GONE
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        handlerMantenimiento.removeCallbacks(runnableEstadoMantenimiento)
+        handlerMantenimiento.post(runnableEstadoMantenimiento)
+    }
+
+    override fun onPause() {
+        handlerMantenimiento.removeCallbacks(runnableEstadoMantenimiento)
+        super.onPause()
     }
 
     // --- FUNCIONES DEL ANALIZADOR WI-FI ---

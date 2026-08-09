@@ -4,23 +4,18 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.content.BroadcastReceiver
 import android.app.Dialog
+import android.app.AlarmManager
 import android.app.PendingIntent
 import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
-import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Color
-import android.graphics.Matrix
 import android.graphics.Typeface
-import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.GradientDrawable
-import android.hardware.Camera
 import android.media.AudioManager
 import android.media.RingtoneManager
 import android.net.ConnectivityManager
@@ -36,7 +31,6 @@ import android.os.Looper
 import android.os.StatFs
 import android.os.SystemClock
 import android.os.Vibrator
-import android.provider.MediaStore
 import android.provider.Settings
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
@@ -47,8 +41,6 @@ import android.text.InputType
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
-import android.view.SurfaceHolder
-import android.view.SurfaceView
 import android.view.View
 import android.view.WindowManager
 import android.view.animation.Animation
@@ -76,19 +68,637 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+object MaintenanceModeManager {
+    private const val PREFS = "ConfigKiosco"
+    private const val KEY_ACTIVO = "it_mantenimiento_activo"
+    private const val KEY_HASTA = "it_mantenimiento_hasta"
+    private const val KEY_INICIO = "it_mantenimiento_inicio"
+    private const val KEY_HOME_MANT_PKG = "it_mantenimiento_home_pkg"
+    private const val KEY_HOME_MANT_CLASS = "it_mantenimiento_home_class"
+    private const val ACTION_EXPIRA = "com.grupotgt.launcherkioscotgt.MANTENIMIENTO_EXPIRA"
+    private const val REQUEST_EXPIRA = 6201
+
+    const val HASTA_MANUAL: Long = Long.MAX_VALUE
+
+    fun estaConfigurado(context: Context): Boolean {
+        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean(KEY_ACTIVO, false)
+    }
+
+    fun estaActivo(context: Context): Boolean {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (!prefs.getBoolean(KEY_ACTIVO, false)) return false
+
+        val hasta = prefs.getLong(KEY_HASTA, 0L)
+        if (hasta == HASTA_MANUAL) return true
+
+        if (hasta <= System.currentTimeMillis()) {
+            prefs.edit()
+                .putBoolean(KEY_ACTIVO, false)
+                .putLong(KEY_HASTA, 0L)
+                .apply()
+            cancelarAlarma(context)
+            return false
+        }
+
+        return true
+    }
+
+    fun esHastaManual(context: Context): Boolean {
+        if (!estaActivo(context)) return false
+        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getLong(KEY_HASTA, 0L) == HASTA_MANUAL
+    }
+
+    fun restanteMs(context: Context): Long {
+        if (!estaActivo(context)) return 0L
+        val hasta = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getLong(KEY_HASTA, 0L)
+        return if (hasta == HASTA_MANUAL) HASTA_MANUAL
+        else (hasta - System.currentTimeMillis()).coerceAtLeast(0L)
+    }
+
+    fun descripcion(context: Context): String {
+        if (!estaActivo(context)) return "INACTIVO"
+        if (esHastaManual(context)) return "HASTA BLOQUEO MANUAL"
+
+        val restante = restanteMs(context)
+        val totalSeg = restante / 1000L
+        val horas = totalSeg / 3600L
+        val minutos = (totalSeg % 3600L) / 60L
+        val segundos = totalSeg % 60L
+        return String.format(Locale.getDefault(), "%02d:%02d:%02d restantes", horas, minutos, segundos)
+    }
+
+    fun activar(context: Context, duracionMs: Long): Long {
+        val ahora = System.currentTimeMillis()
+        val hasta = if (duracionMs < 0L) HASTA_MANUAL else ahora + duracionMs
+
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_ACTIVO, true)
+            .putLong(KEY_INICIO, ahora)
+            .putLong(KEY_HASTA, hasta)
+            .commit()
+
+        if (hasta == HASTA_MANUAL) {
+            cancelarAlarma(context)
+        } else {
+            programarAlarma(context, hasta)
+        }
+
+        return hasta
+    }
+
+    fun finalizarEstado(context: Context, motivo: String) {
+        val estabaActivo = estaConfigurado(context)
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_ACTIVO, false)
+            .putLong(KEY_HASTA, 0L)
+            .putLong(KEY_INICIO, 0L)
+            .commit()
+
+        cancelarAlarma(context)
+
+        if (estabaActivo) {
+            AppLog.info("IT MANTENIMIENTO -> finalizado. Motivo=$motivo")
+        }
+    }
+
+    private fun filtroHome(): IntentFilter {
+        return IntentFilter(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_HOME)
+            addCategory(Intent.CATEGORY_DEFAULT)
+        }
+    }
+
+    private fun componenteHomeAlias(context: Context): ComponentName {
+        return ComponentName(context.packageName, "${context.packageName}.HomeActivity")
+    }
+
+    private fun habilitarHomeAlias(context: Context, habilitar: Boolean) {
+        val estado = if (habilitar) {
+            PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+        } else {
+            PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+        }
+
+        context.packageManager.setComponentEnabledSetting(
+            componenteHomeAlias(context),
+            estado,
+            PackageManager.DONT_KILL_APP
+        )
+
+        AppLog.info(
+            "HOME ALIAS -> ${if (habilitar) "HABILITADO" else "DESHABILITADO"} " +
+                    "(${componenteHomeAlias(context).flattenToShortString()})"
+        )
+    }
+
+    fun prepararHomeProduccion(context: Context) {
+        try {
+            habilitarHomeAlias(context, true)
+        } catch (e: Exception) {
+            AppLog.error("KIOSK -> no se pudo habilitar HOME alias: ${e.message}")
+        }
+    }
+
+    private fun buscarLauncherNativo(context: Context): ComponentName? {
+        return try {
+            val pm = context.packageManager
+
+            // Este parque de terminales usa Samsung One UI Home. No dejamos que
+            // Android elija com.android.settings/.FallbackHome, porque NO es un
+            // escritorio de usuario y fue precisamente uno de los falsos candidatos
+            // detectados durante el diagnóstico ADB.
+            val oneUiHome = ComponentName(
+                "com.sec.android.app.launcher",
+                "com.sec.android.app.launcher.activities.LauncherActivity"
+            )
+
+            val oneUiDisponible = try {
+                @Suppress("DEPRECATION")
+                pm.getActivityInfo(oneUiHome, 0)
+                true
+            } catch (_: Exception) {
+                false
+            }
+
+            if (oneUiDisponible) {
+                AppLog.success(
+                    "IT MANTENIMIENTO -> One UI Home detectado: ${oneUiHome.flattenToShortString()}"
+                )
+                return oneUiHome
+            }
+
+            // Fallback para futuros terminales no Samsung. Nunca aceptamos FallbackHome
+            // de Settings como launcher de mantenimiento.
+            val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_HOME)
+                addCategory(Intent.CATEGORY_DEFAULT)
+            }
+
+            val candidatos = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                pm.queryIntentActivities(
+                    homeIntent,
+                    PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_DEFAULT_ONLY.toLong())
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                pm.queryIntentActivities(homeIntent, PackageManager.MATCH_DEFAULT_ONLY)
+            }
+
+            val externos = candidatos
+                .mapNotNull { ri ->
+                    val ai = ri.activityInfo ?: return@mapNotNull null
+                    if (ai.packageName == context.packageName) return@mapNotNull null
+                    if (ai.packageName == "com.android.settings") return@mapNotNull null
+                    ComponentName(ai.packageName, ai.name)
+                }
+                .distinctBy { it.flattenToShortString() }
+
+            AppLog.info(
+                "IT MANTENIMIENTO -> HOME externos válidos=" +
+                        externos.joinToString { it.flattenToShortString() }
+            )
+
+            externos.firstOrNull()
+        } catch (e: Exception) {
+            AppLog.error("IT MANTENIMIENTO -> error buscando launcher nativo: ${e.message}")
+            null
+        }
+    }
+
+    private fun guardarHomeMantenimiento(context: Context, component: ComponentName?) {
+        val edit = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+        if (component == null) {
+            edit.remove(KEY_HOME_MANT_PKG).remove(KEY_HOME_MANT_CLASS).commit()
+        } else {
+            edit.putString(KEY_HOME_MANT_PKG, component.packageName)
+                .putString(KEY_HOME_MANT_CLASS, component.className)
+                .commit()
+        }
+    }
+
+    private fun leerHomeMantenimiento(context: Context): ComponentName? {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val pkg = prefs.getString(KEY_HOME_MANT_PKG, null)
+        val cls = prefs.getString(KEY_HOME_MANT_CLASS, null)
+        return if (!pkg.isNullOrBlank() && !cls.isNullOrBlank()) ComponentName(pkg, cls) else null
+    }
+
+    private fun obtenerPaquetesMantenimiento(context: Context): Array<String> {
+        val pm = context.packageManager
+        val paquetes = linkedSetOf<String>()
+
+        try {
+            val instalados = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                pm.getInstalledPackages(PackageManager.PackageInfoFlags.of(0L))
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getInstalledPackages(0)
+            }
+            instalados.mapTo(paquetes) { it.packageName }
+        } catch (e: Exception) {
+            AppLog.warning("IT MANTENIMIENTO -> no se pudo enumerar todos los paquetes: ${e.message}")
+        }
+
+        // Garantías explícitas para las piezas críticas del mantenimiento Samsung.
+        paquetes.add(context.packageName)
+        paquetes.add("com.sec.android.app.launcher")
+        paquetes.add("com.android.settings")
+        paquetes.add("com.android.vending")
+        paquetes.add("com.google.android.gms")
+        paquetes.add("com.google.android.packageinstaller")
+        paquetes.add("com.android.packageinstaller")
+        paquetes.add("com.samsung.android.packageinstaller")
+        paquetes.add("com.google.android.permissioncontroller")
+        paquetes.add("com.android.permissioncontroller")
+        paquetes.add("com.sec.android.app.myfiles")
+        paquetes.add("com.sec.android.app.samsungapps")
+
+        return paquetes.toTypedArray()
+    }
+
+    fun refrescarAllowlistMantenimiento(context: Context): Boolean {
+        if (!estaActivo(context)) return false
+
+        return try {
+            val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+            val admin = ComponentName(context, MyAdminReceiver::class.java)
+            if (!dpm.isDeviceOwnerApp(context.packageName)) {
+                AppLog.error("IT MANTENIMIENTO -> no es Device Owner; no se puede liberar LockTask.")
+                return false
+            }
+
+            // En mantenimiento REAL no necesitamos una allowlist multi-app: LockTask debe estar NONE.
+            // Dejamos la lista vacía para evitar que una tarea vuelva a entrar accidentalmente en kiosco.
+            dpm.setLockTaskPackages(admin, emptyArray<String>())
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                dpm.setLockTaskFeatures(admin, DevicePolicyManager.LOCK_TASK_FEATURE_NONE)
+            }
+
+            val totalConfirmado = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                try { dpm.getLockTaskPackages(admin).size } catch (_: Exception) { -1 }
+            } else {
+                -1
+            }
+
+            AppLog.success(
+                "IT MANTENIMIENTO -> LockTask allowlist vaciada | Paquetes=$totalConfirmado"
+            )
+            true
+        } catch (e: Exception) {
+            AppLog.error("IT MANTENIMIENTO -> error vaciando LockTask allowlist: ${e.message}")
+            false
+        }
+    }
+
+    fun suspenderPoliticasKiosco(context: Context): Boolean {
+        return try {
+            val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+            val admin = ComponentName(context, MyAdminReceiver::class.java)
+
+            if (!dpm.isDeviceOwnerApp(context.packageName)) {
+                AppLog.warning("IT MANTENIMIENTO -> no es Device Owner; no se puede abrir mantenimiento.")
+                return false
+            }
+
+            val launcherNativo = buscarLauncherNativo(context)
+            guardarHomeMantenimiento(context, launcherNativo)
+
+            if (launcherNativo == null) {
+                AppLog.error("IT MANTENIMIENTO -> no se encontró One UI Home.")
+                return false
+            }
+
+            // 1) Con LockTask ya detenido por MainActivity, eliminamos cualquier allowlist residual.
+            if (!refrescarAllowlistMantenimiento(context)) {
+                return false
+            }
+
+            // 2) TGT deja de ser candidato HOME de forma física, no sólo por preferencia.
+            try {
+                habilitarHomeAlias(context, false)
+            } catch (e: Exception) {
+                AppLog.error("IT MANTENIMIENTO -> no se pudo deshabilitar HOME alias TGT: ${e.message}")
+                return false
+            }
+
+            // 3) Retiramos la política HOME de TGT y fijamos explícitamente One UI Home.
+            try {
+                dpm.clearPackagePersistentPreferredActivities(admin, context.packageName)
+                AppLog.info("IT MANTENIMIENTO -> preferencia HOME persistente de TGT eliminada.")
+            } catch (e: Exception) {
+                AppLog.warning("IT MANTENIMIENTO -> no se pudo limpiar HOME TGT: ${e.message}")
+            }
+
+            try {
+                dpm.clearPackagePersistentPreferredActivities(admin, launcherNativo.packageName)
+            } catch (_: Exception) {
+            }
+
+            dpm.addPersistentPreferredActivity(admin, filtroHome(), launcherNativo)
+            AppLog.success(
+                "IT MANTENIMIENTO -> One UI Home fijado como HOME temporal: ${launcherNativo.flattenToShortString()}"
+            )
+
+            val homeResuelto = try {
+                val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+                    addCategory(Intent.CATEGORY_HOME)
+                    addCategory(Intent.CATEGORY_DEFAULT)
+                }
+                val ri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    context.packageManager.resolveActivity(
+                        homeIntent,
+                        PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_DEFAULT_ONLY.toLong())
+                    )
+                } else {
+                    @Suppress("DEPRECATION")
+                    context.packageManager.resolveActivity(homeIntent, PackageManager.MATCH_DEFAULT_ONLY)
+                }
+                ri?.activityInfo?.let { ComponentName(it.packageName, it.name) }
+            } catch (_: Exception) { null }
+
+            AppLog.info(
+                "IT MANTENIMIENTO -> HOME resuelto después del cambio=" +
+                        (homeResuelto?.flattenToShortString() ?: "<ninguno>")
+            )
+
+            // 4) Abrimos el launcher Samsung por componente exacto. El diagnóstico ADB ya confirmó
+            // que este componente arranca correctamente cuando LockTask está en NONE.
+            val explicitHome = Intent(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_HOME)
+                addCategory(Intent.CATEGORY_DEFAULT)
+                component = launcherNativo
+                addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                            Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED or
+                            Intent.FLAG_ACTIVITY_CLEAR_TOP
+                )
+            }
+            context.startActivity(explicitHome)
+            AppLog.success(
+                "IT MANTENIMIENTO -> One UI Home abierto explícitamente: ${launcherNativo.flattenToShortString()}"
+            )
+
+            true
+        } catch (e: Exception) {
+            AppLog.error("IT MANTENIMIENTO -> error cediendo HOME a One UI: ${e.message}")
+            false
+        }
+    }
+
+    fun abrirEscritorioSistema(context: Context): Boolean {
+        return try {
+            val launcherNativo = leerHomeMantenimiento(context) ?: buscarLauncherNativo(context)
+            if (launcherNativo == null) {
+                AppLog.error("IT MANTENIMIENTO -> no hay launcher nativo guardado para abrir.")
+                return false
+            }
+
+            val explicitHome = Intent(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_HOME)
+                addCategory(Intent.CATEGORY_DEFAULT)
+                component = launcherNativo
+                addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                            Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED or
+                            Intent.FLAG_ACTIVITY_CLEAR_TOP
+                )
+            }
+
+            context.startActivity(explicitHome)
+            AppLog.success(
+                "IT MANTENIMIENTO -> One UI Home abierto explícitamente: ${launcherNativo.flattenToShortString()}"
+            )
+            true
+        } catch (e: Exception) {
+            AppLog.error("IT MANTENIMIENTO -> no se pudo abrir One UI Home: ${e.message}")
+            false
+        }
+    }
+
+    fun limpiarHomeMantenimiento(context: Context) {
+        try {
+            val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+            val admin = ComponentName(context, MyAdminReceiver::class.java)
+            val launcherNativo = leerHomeMantenimiento(context)
+
+            if (dpm.isDeviceOwnerApp(context.packageName) && launcherNativo != null) {
+                try {
+                    dpm.clearPackagePersistentPreferredActivities(admin, launcherNativo.packageName)
+                    AppLog.info(
+                        "IT MANTENIMIENTO -> HOME temporal OEM retirado: ${launcherNativo.flattenToShortString()}"
+                    )
+                } catch (e: Exception) {
+                    AppLog.warning("IT MANTENIMIENTO -> no se pudo retirar HOME temporal OEM: ${e.message}")
+                }
+            }
+        } finally {
+            guardarHomeMantenimiento(context, null)
+            prepararHomeProduccion(context)
+        }
+    }
+
+    fun reprogramarSiActivo(context: Context) {
+        if (!estaActivo(context) || esHastaManual(context)) return
+        val hasta = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getLong(KEY_HASTA, 0L)
+        if (hasta > System.currentTimeMillis()) programarAlarma(context, hasta)
+    }
+
+    private fun pendingIntentExpiracion(context: Context): PendingIntent {
+        val intent = Intent(context, MaintenanceExpiryReceiver::class.java).apply {
+            action = ACTION_EXPIRA
+        }
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        return PendingIntent.getBroadcast(context, REQUEST_EXPIRA, intent, flags)
+    }
+
+    private fun programarAlarma(context: Context, hasta: Long) {
+        try {
+            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            val pi = pendingIntentExpiracion(context)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                alarmManager.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, hasta, pi)
+            } else {
+                alarmManager.set(AlarmManager.RTC_WAKEUP, hasta, pi)
+            }
+            AppLog.info("IT MANTENIMIENTO -> cierre automático programado para $hasta.")
+        } catch (e: Exception) {
+            AppLog.error("IT MANTENIMIENTO -> no se pudo programar cierre automático: ${e.message}")
+        }
+    }
+
+    private fun cancelarAlarma(context: Context) {
+        try {
+            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+            alarmManager.cancel(pendingIntentExpiracion(context))
+        } catch (_: Exception) {
+        }
+    }
+}
+
+object KioskPolicyManager {
+    fun aplicar(context: Context): Boolean {
+        if (MaintenanceModeManager.estaActivo(context)) {
+            AppLog.info("KIOSK POLICY -> omitida porque Modo Mantenimiento IT está activo.")
+            return false
+        }
+
+        return try {
+            val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+            val admin = ComponentName(context, MyAdminReceiver::class.java)
+
+            if (!dpm.isDeviceOwnerApp(context.packageName)) {
+                AppLog.warning("KIOSK POLICY -> el Launcher no es Device Owner; no se puede fijar HOME persistente.")
+                return false
+            }
+
+            // Retiramos cualquier HOME OEM temporal usado en mantenimiento y rehabilitamos HOME TGT.
+            MaintenanceModeManager.limpiarHomeMantenimiento(context)
+            try {
+                dpm.clearPackagePersistentPreferredActivities(admin, context.packageName)
+            } catch (_: Exception) {
+            }
+
+            val prefs = context.getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
+            val appsConfiguradas = (prefs.getString("apps_permitidas", "") ?: "")
+                .split(",")
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+
+            val paquetes = linkedSetOf(context.packageName)
+            paquetes.addAll(appsConfiguradas)
+            dpm.setLockTaskPackages(admin, paquetes.toTypedArray())
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                dpm.setLockTaskFeatures(admin, DevicePolicyManager.LOCK_TASK_FEATURE_NONE)
+            }
+
+            val homeFilter = IntentFilter(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_HOME)
+                addCategory(Intent.CATEGORY_DEFAULT)
+            }
+            val homeActivity = ComponentName(context.packageName, "${context.packageName}.HomeActivity")
+            dpm.addPersistentPreferredActivity(admin, homeFilter, homeActivity)
+
+            val permitido = dpm.isLockTaskPermitted(context.packageName)
+            AppLog.success(
+                "KIOSK POLICY -> HOME persistente aplicado | LockTaskPermitido=$permitido | " +
+                        "AppsPermitidas=${paquetes.size}"
+            )
+            permitido
+        } catch (e: Exception) {
+            AppLog.error("KIOSK POLICY -> error aplicando políticas base: ${e.message}")
+            false
+        }
+    }
+}
+
 class BootAndReplacedReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context?, intent: Intent?) {
-        val accion = intent?.action
-        if (accion == Intent.ACTION_MY_PACKAGE_REPLACED || accion == Intent.ACTION_BOOT_COMPLETED) {
-            context?.let {
-                AppLog.inicializar(it)
-                AppLog.info("Evento detectado ($accion). Reiniciando Launcher automáticamente...")
-                val i = Intent(it, MainActivity::class.java).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        val accion = intent?.action ?: return
+        val ctx = context ?: return
+
+        AppLog.inicializar(ctx)
+
+        when (accion) {
+            Intent.ACTION_BOOT_COMPLETED -> {
+                // Un reinicio SIEMPRE cancela mantenimiento: el terminal vuelve seguro.
+                MaintenanceModeManager.finalizarEstado(ctx, "reinicio del dispositivo")
+                AppLog.info("BOOT -> mantenimiento cancelado por seguridad. Restaurando HOME/Kiosco...")
+                val politicaOk = KioskPolicyManager.aplicar(ctx)
+                AppLog.info("BOOT -> política kiosco aplicada=$politicaOk")
+                abrirLauncher(ctx)
+            }
+
+            Intent.ACTION_MY_PACKAGE_REPLACED -> {
+                // Android Studio/OTA pueden reemplazar la APK durante mantenimiento.
+                // En ese caso NO reblinda el terminal a mitad del trabajo de IT.
+                if (MaintenanceModeManager.estaActivo(ctx)) {
+                    MaintenanceModeManager.reprogramarSiActivo(ctx)
+                    val suspendido = MaintenanceModeManager.suspenderPoliticasKiosco(ctx)
+                    AppLog.info(
+                        "PACKAGE_REPLACED -> mantenimiento sigue activo (${MaintenanceModeManager.descripcion(ctx)}). " +
+                                "HOME alias continúa deshabilitado. Suspendido=$suspendido"
+                    )
+                } else {
+                    AppLog.info("PACKAGE_REPLACED -> mantenimiento inactivo. Restaurando HOME/Kiosco...")
+                    val politicaOk = KioskPolicyManager.aplicar(ctx)
+                    AppLog.info("PACKAGE_REPLACED -> política kiosco aplicada=$politicaOk")
+                    abrirLauncher(ctx)
                 }
-                it.startActivity(i)
             }
         }
+    }
+
+    private fun abrirLauncher(context: Context) {
+        try {
+            val i = Intent(context, MainActivity::class.java).apply {
+                addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                            Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                            Intent.FLAG_ACTIVITY_SINGLE_TOP
+                )
+            }
+            context.startActivity(i)
+        } catch (e: Exception) {
+            AppLog.error("BOOT/PACKAGE_REPLACED -> no se pudo abrir Launcher: ${e.message}")
+        }
+    }
+}
+
+class MaintenanceExpiryReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context?, intent: Intent?) {
+        val ctx = context ?: return
+        AppLog.inicializar(ctx)
+
+        if (!MaintenanceModeManager.estaConfigurado(ctx)) return
+
+        if (MaintenanceModeManager.esHastaManual(ctx)) {
+            AppLog.info("IT MANTENIMIENTO -> alarma ignorada: modo hasta bloqueo manual.")
+            return
+        }
+
+        val restante = MaintenanceModeManager.restanteMs(ctx)
+        if (restante > 1500L) {
+            // AlarmManager inexacto puede despertar antes/después: reprogramamos si aún no toca.
+            MaintenanceModeManager.reprogramarSiActivo(ctx)
+            return
+        }
+
+        MaintenanceModeManager.finalizarEstado(ctx, "tiempo agotado")
+        val politicaOk = KioskPolicyManager.aplicar(ctx)
+        AppLog.success("IT MANTENIMIENTO -> tiempo agotado. Kiosco restaurado=$politicaOk")
+
+        try {
+            val i = Intent(ctx, MainActivity::class.java).apply {
+                addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                            Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                            Intent.FLAG_ACTIVITY_SINGLE_TOP
+                )
+            }
+            ctx.startActivity(i)
+        } catch (e: Exception) {
+            AppLog.error("IT MANTENIMIENTO -> no se pudo traer Launcher al frente al caducar: ${e.message}")
+        }
+    }
+}
+
+
+class MaintenancePackageChangeReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context?, intent: Intent?) {
+        val ctx = context ?: return
+        if (!MaintenanceModeManager.estaActivo(ctx)) return
+
+        AppLog.inicializar(ctx)
+        val pkg = intent?.data?.schemeSpecificPart ?: "<desconocido>"
+        AppLog.info("IT MANTENIMIENTO -> cambio de paquete detectado: ${intent?.action} $pkg")
+        MaintenanceModeManager.refrescarAllowlistMantenimiento(ctx)
     }
 }
 
@@ -166,48 +776,155 @@ object AppLog {
     }
 }
 
+object OtaRuntimeState {
+    @Volatile
+    var enCurso: Boolean = false
+        private set
+
+    @Volatile
+    var versionObjetivo: Int = -1
+        private set
+
+    @Synchronized
+    fun intentarIniciar(version: Int): Boolean {
+        if (enCurso) return false
+        enCurso = true
+        versionObjetivo = version
+        return true
+    }
+
+    @Synchronized
+    fun finalizar() {
+        enCurso = false
+        versionObjetivo = -1
+    }
+}
+
 @Suppress("DEPRECATION")
 class ApkInstallReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context?, intent: Intent?) {
-        if (context != null) {
-            AppLog.inicializar(context)
-        }
-        val status = intent?.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
-        val msg = intent?.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "Sin mensaje adicional"
+        if (context == null || intent == null) return
+
+        AppLog.inicializar(context)
+
+        val status = intent.getIntExtra(
+            PackageInstaller.EXTRA_STATUS,
+            PackageInstaller.STATUS_FAILURE
+        )
+        val msg = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "Sin mensaje adicional"
+        val sessionId = intent.getIntExtra("ota_session_id", -1)
+
+        AppLog.info(
+            "OTA PackageInstaller callback -> Session=$sessionId | Status=$status | Message=$msg"
+        )
 
         when (status) {
-            PackageInstaller.STATUS_SUCCESS -> {
-                AppLog.success("¡Actualización OTA aplicada con éxito!")
-                Toast.makeText(context, "🎉 ¡Actualización aplicada con éxito!", Toast.LENGTH_LONG).show()
+            PackageInstaller.STATUS_PENDING_USER_ACTION -> {
+                AppLog.warning(
+                    "OTA -> STATUS_PENDING_USER_ACTION (-1). Android solicita confirmación para continuar."
+                )
+
+                val confirmationIntent: Intent? =
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        intent.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        intent.getParcelableExtra(Intent.EXTRA_INTENT) as? Intent
+                    }
+
+                if (confirmationIntent == null) {
+                    AppLog.error(
+                        "OTA -> Android pidió confirmación, pero no devolvió Intent.EXTRA_INTENT."
+                    )
+                    OtaRuntimeState.finalizar()
+                    Toast.makeText(
+                        context,
+                        "⚠️ Android requiere confirmar la actualización, pero no pudo abrirse el instalador.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    return
+                }
+
+                try {
+                    confirmationIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    context.startActivity(confirmationIntent)
+
+                    AppLog.info(
+                        "OTA -> pantalla de confirmación de Android abierta correctamente."
+                    )
+                    Toast.makeText(
+                        context,
+                        "📦 Confirma la actualización de Launcher TGT.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                } catch (e: Exception) {
+                    OtaRuntimeState.finalizar()
+                    AppLog.error(
+                        "OTA -> no se pudo abrir la confirmación de Android: ${e.message}"
+                    )
+                    Toast.makeText(
+                        context,
+                        "❌ No se pudo abrir el instalador de Android.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
             }
+
+            PackageInstaller.STATUS_SUCCESS -> {
+                OtaRuntimeState.finalizar()
+                AppLog.success(
+                    "OTA -> STATUS_SUCCESS. Actualización instalada correctamente. Session=$sessionId"
+                )
+                Toast.makeText(
+                    context,
+                    "🎉 ¡Actualización aplicada con éxito!",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+
             else -> {
-                AppLog.error("FALLO INSTALACIÓN OTA [Cod: $status]: $msg")
-                Toast.makeText(context, "❌ Error OTA [Cod: $status]: $msg", Toast.LENGTH_LONG).show()
+                OtaRuntimeState.finalizar()
+                AppLog.error(
+                    "FALLO REAL INSTALACIÓN OTA [Session=$sessionId | Cod=$status]: $msg"
+                )
+                Toast.makeText(
+                    context,
+                    "❌ Error OTA [Cod: $status]: $msg",
+                    Toast.LENGTH_LONG
+                ).show()
 
-                if (context != null) {
-                    try {
-                        val prefs = context.getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
-                        val ubicacion = prefs.getString("ubicacion_dispositivo", "Desconocida")
-                        val numeroIT = prefs.getString("telefono_it", "") ?: ""
+                try {
+                    val prefs = context.getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
+                    val ubicacion = prefs.getString("ubicacion_dispositivo", "Desconocida")
+                    val numeroIT = prefs.getString("telefono_it", "") ?: ""
 
-                        if (numeroIT.isNotEmpty()) {
-                            val mensajeError = "🚨 ALERTA KIOSCO [$ubicacion]: Fallo crítico al instalar la OTA. Android ha restaurado la versión anterior. Motivo: $msg"
+                    val permisoSmsConcedido =
+                        Build.VERSION.SDK_INT < Build.VERSION_CODES.M ||
+                                context.checkSelfPermission(Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED
 
-                            val smsManager: SmsManager? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                context.getSystemService(SmsManager::class.java)
-                            } else {
-                                SmsManager.getDefault()
-                            }
+                    if (numeroIT.isNotEmpty() && permisoSmsConcedido) {
+                        val mensajeError =
+                            "🚨 ALERTA KIOSCO [$ubicacion]: Fallo real al instalar OTA. " +
+                                    "Código=$status. Motivo=$msg"
 
-                            if (smsManager != null) {
-                                val parts = smsManager.divideMessage(mensajeError)
-                                smsManager.sendMultipartTextMessage(numeroIT, null, parts, null, null)
-                            }
+                        val smsManager: SmsManager? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            context.getSystemService(SmsManager::class.java)
+                        } else {
+                            SmsManager.getDefault()
+                        }
+
+                        if (smsManager != null) {
+                            val parts = smsManager.divideMessage(mensajeError)
+                            smsManager.sendMultipartTextMessage(numeroIT, null, parts, null, null)
                             AppLog.info("Alerta de fallo OTA enviada por SMS a IT de forma automática.")
                         }
-                    } catch (e: Exception) {
-                        AppLog.error("Error enviando alerta de fallo OTA: ${e.message}")
+                    } else if (numeroIT.isNotEmpty()) {
+                        AppLog.warning(
+                            "OTA -> no se envía SMS de fallo porque SEND_SMS no está concedido."
+                        )
                     }
+                } catch (e: Exception) {
+                    AppLog.error("Error enviando alerta de fallo OTA: ${e.message}")
                 }
             }
         }
@@ -217,11 +934,17 @@ class ApkInstallReceiver : BroadcastReceiver() {
 @Suppress("DEPRECATION")
 class MainActivity : AppCompatActivity() {
 
+    companion object {
+        const val EXTRA_FORZAR_OTA = "com.grupotgt.launcherkioscotgt.EXTRA_FORZAR_OTA"
+        const val EXTRA_MANTENIMIENTO_MS = "com.grupotgt.launcherkioscotgt.EXTRA_MANTENIMIENTO_MS"
+        const val EXTRA_ABRIR_AJUSTES = "com.grupotgt.launcherkioscotgt.EXTRA_ABRIR_AJUSTES"
+        const val EXTRA_FINALIZAR_MANTENIMIENTO = "com.grupotgt.launcherkioscotgt.EXTRA_FINALIZAR_MANTENIMIENTO"
+    }
+
     private val URL_GOOGLE_SHEETS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSye0TO9CYH8xXSPy-rCNDOO4UjiNdmp32SiOWLwxsUPI25ZW9rHW44JlAPn38_4vVpJK5Pw6tu5Ct0/pub?output=csv"
     private val URL_OTA_JSON = "https://grupotgt.github.io/actualizaciones-launcher/version.json"
 
     private val handler = Handler(Looper.getMainLooper())
-    private lateinit var runnableConsola: Runnable
 
     private val intervaloSyncAgenda = 5 * 60 * 1000L
     private val intervaloCheckOTA = 2 * 60 * 1000L
@@ -250,11 +973,9 @@ class MainActivity : AppCompatActivity() {
     private var ultimoTTSGlobal = ""
     private var ultimoReinicioEjecutado = ""
 
-    private var toquesSalida = 0
-    private var toquesBateria = 0
-    private var toquesWifi = 0
     private var contadorVolumenAbajo = 0
     private var contadorVolumenArriba = 0
+    private var primeraReanudacion = true
 
     private var dialogLlamadaActiva: Dialog? = null
     private var dialogLlamadaEntrante: Dialog? = null
@@ -359,7 +1080,17 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         try {
             AppLog.inicializar(this)
-            AppLog.info("MainActivity iniciada (Versión Definitiva MDM Hardware)")
+            registrarArranqueReal()
+
+            // Seguridad primero, salvo que IT haya abierto un mantenimiento válido.
+            if (MaintenanceModeManager.estaActivo(this)) {
+                MaintenanceModeManager.reprogramarSiActivo(this)
+                AppLog.warning(
+                    "IT MANTENIMIENTO -> Launcher iniciado en modo mantenimiento (${MaintenanceModeManager.descripcion(this)})."
+                )
+            } else {
+                KioskPolicyManager.aplicar(this)
+            }
             Thread.setDefaultUncaughtExceptionHandler { _, throwable ->
                 val errorMsg = "CRASH: ${throwable.localizedMessage}"
                 AppLog.error(errorMsg)
@@ -412,6 +1143,14 @@ class MainActivity : AppCompatActivity() {
 
             setContentView(R.layout.activity_main)
 
+            procesarIntentMantenimiento(intent)
+
+            if (!MaintenanceModeManager.estaActivo(this)) {
+                entrarEnKioscoSiPermitido("onCreate")
+            } else {
+                AppLog.info("IT MANTENIMIENTO -> no se activa LockTask en onCreate.")
+            }
+
             if (prefs.getBoolean("mdm_robo_activo", false)) {
                 handler.post { mostrarPantallaRobo() }
             }
@@ -439,11 +1178,17 @@ class MainActivity : AppCompatActivity() {
             cargarIdentificacionYLogo()
             cargarAgendaDesdeCache()
             descargarAgendaNube(modoSilencioso = true)
-            comprobarActualizacionOTA()
+
+            val otaForzadaDesdePanel = intent?.getBooleanExtra(EXTRA_FORZAR_OTA, false) == true
+            if (otaForzadaDesdePanel) {
+                intent?.removeExtra(EXTRA_FORZAR_OTA)
+                AppLog.ota("OTA manual solicitada desde Panel IT. Ejecutando motor OTA único.")
+                comprobarActualizacionOTA(forzada = true)
+            } else {
+                comprobarActualizacionOTA()
+            }
 
             configurarBotonSecreto()
-            configurarBotonRatones()
-            configurarBromaJefe()
             configurarChivatoSincro()
 
             handler.post(runnableEstadoDispositivo)
@@ -461,6 +1206,160 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             AppLog.error("Error en onCreate: ${e.message}")
             e.printStackTrace()
+        }
+    }
+
+    private fun registrarArranqueReal() {
+        try {
+            val pInfo = packageManager.getPackageInfo(packageName, 0)
+            val versionName = pInfo.versionName ?: "?"
+            val versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                pInfo.longVersionCode
+            } else {
+                @Suppress("DEPRECATION")
+                pInfo.versionCode.toLong()
+            }
+            val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+            val esDeviceOwner = dpm.isDeviceOwnerApp(packageName)
+
+            AppLog.info(
+                "Launcher TGT iniciado | Runtime=V62.8-HOME-HANDOFF | VersionName=$versionName | VersionCode=$versionCode | " +
+                        "Android=${Build.VERSION.RELEASE} | API=${Build.VERSION.SDK_INT} | DeviceOwner=$esDeviceOwner"
+            )
+        } catch (e: Exception) {
+            AppLog.warning("No se pudo obtener versión real al arrancar: ${e.message}")
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+
+        if (procesarIntentMantenimiento(intent)) return
+
+        if (intent.getBooleanExtra(EXTRA_FORZAR_OTA, false)) {
+            intent.removeExtra(EXTRA_FORZAR_OTA)
+            AppLog.ota("OTA manual recibida con MainActivity ya activa. Ejecutando motor OTA único.")
+            comprobarActualizacionOTA(forzada = true)
+        }
+    }
+
+    private fun procesarIntentMantenimiento(intent: Intent?): Boolean {
+        if (intent == null) return false
+
+        if (intent.getBooleanExtra(EXTRA_FINALIZAR_MANTENIMIENTO, false)) {
+            intent.removeExtra(EXTRA_FINALIZAR_MANTENIMIENTO)
+            finalizarModoMantenimiento("cierre manual desde Panel IT")
+            return true
+        }
+
+        if (intent.hasExtra(EXTRA_MANTENIMIENTO_MS)) {
+            val duracionMs = intent.getLongExtra(EXTRA_MANTENIMIENTO_MS, 15L * 60L * 1000L)
+            val abrirAjustes = intent.getBooleanExtra(EXTRA_ABRIR_AJUSTES, true)
+            intent.removeExtra(EXTRA_MANTENIMIENTO_MS)
+            intent.removeExtra(EXTRA_ABRIR_AJUSTES)
+            activarModoMantenimiento(duracionMs, abrirAjustes)
+            return true
+        }
+
+        return false
+    }
+
+    private fun activarModoMantenimiento(duracionMs: Long, abrirAjustes: Boolean) {
+        try {
+            // Marcamos mantenimiento ANTES de tocar la tarea. Así ningún onResume puede
+            // reactivar la política kiosco durante la transición.
+            val hasta = MaintenanceModeManager.activar(this, duracionMs)
+            val descripcion = if (hasta == MaintenanceModeManager.HASTA_MANUAL) {
+                "hasta bloqueo manual"
+            } else {
+                MaintenanceModeManager.descripcion(this)
+            }
+
+            AppLog.warning("IT MANTENIMIENTO -> INICIANDO ($descripcion)")
+
+            // MainActivity es quien inició startLockTask(), por tanto es quien debe cerrarlo.
+            try {
+                stopLockTask()
+                AppLog.success("IT MANTENIMIENTO -> stopLockTask ejecutado desde MainActivity.")
+            } catch (e: Exception) {
+                AppLog.warning("IT MANTENIMIENTO -> stopLockTask devolvió: ${e.message}")
+            }
+
+            // Respaldo DPC: vaciar la allowlist también evita reentrada accidental en LockTask.
+            val allowlistVaciada = MaintenanceModeManager.refrescarAllowlistMantenimiento(this)
+
+            val am = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+            val estado = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                am.lockTaskModeState
+            } else {
+                @Suppress("DEPRECATION")
+                if (am.isInLockTaskMode) 1 else 0
+            }
+
+            AppLog.info(
+                "IT MANTENIMIENTO -> después de stopLockTask | LockTaskState=$estado | AllowlistVaciada=$allowlistVaciada"
+            )
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+                estado != android.app.ActivityManager.LOCK_TASK_MODE_NONE) {
+                MaintenanceModeManager.finalizarEstado(this, "LockTask no llegó a NONE")
+                KioskPolicyManager.aplicar(this)
+                entrarEnKioscoSiPermitido("rollback mantenimiento: LockTask sigue activo")
+                Toast.makeText(
+                    this,
+                    "❌ No se pudo liberar el modo kiosco. El terminal sigue protegido.",
+                    Toast.LENGTH_LONG
+                ).show()
+                return
+            }
+
+            val homeOk = MaintenanceModeManager.suspenderPoliticasKiosco(this)
+            if (!homeOk) {
+                MaintenanceModeManager.finalizarEstado(this, "fallo al ceder HOME a One UI")
+                KioskPolicyManager.aplicar(this)
+                entrarEnKioscoSiPermitido("rollback mantenimiento: HOME")
+                Toast.makeText(
+                    this,
+                    "❌ No se pudo ceder el escritorio a One UI. El terminal sigue protegido.",
+                    Toast.LENGTH_LONG
+                ).show()
+                return
+            }
+
+            Toast.makeText(
+                this,
+                "🛠️ Mantenimiento IT activo: $descripcion",
+                Toast.LENGTH_LONG
+            ).show()
+
+            // Reaplicamos una vez tras el cambio de política. En Android recientes la política
+            // persistente puede notificarse de forma asíncrona; el alias TGT ya permanece deshabilitado.
+            Handler(Looper.getMainLooper()).postDelayed({
+                if (MaintenanceModeManager.estaActivo(this)) {
+                    MaintenanceModeManager.suspenderPoliticasKiosco(this)
+                }
+            }, 600L)
+
+            AppLog.success(
+                "IT MANTENIMIENTO -> salida real preparada: LockTask NONE + HOME One UI + TGT HOME deshabilitado."
+            )
+        } catch (e: Exception) {
+            AppLog.error("IT MANTENIMIENTO -> error activando mantenimiento: ${e.message}")
+        }
+    }
+
+    private fun finalizarModoMantenimiento(motivo: String) {
+        try {
+            MaintenanceModeManager.finalizarEstado(this, motivo)
+            val politicaOk = KioskPolicyManager.aplicar(this)
+            configurarModoKioscoEstricto()
+            entrarEnKioscoSiPermitido("fin mantenimiento")
+
+            AppLog.success("IT MANTENIMIENTO -> terminal protegido de nuevo. PoliticaOk=$politicaOk")
+            Toast.makeText(this, "🔒 Terminal protegido de nuevo", Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            AppLog.error("IT MANTENIMIENTO -> error restaurando kiosco: ${e.message}")
         }
     }
 
@@ -1883,60 +2782,101 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun configurarModoKioscoEstricto() {
+        if (MaintenanceModeManager.estaActivo(this)) {
+            AppLog.info("KIOSK -> configurarModoKioscoEstricto omitido por mantenimiento IT.")
+            return
+        }
+
         try {
             val devicePolicyManager = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
             val componentName = ComponentName(this, MyAdminReceiver::class.java)
 
-            if (devicePolicyManager.isDeviceOwnerApp(packageName)) {
-                val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
-                val appsStr = prefs.getString("apps_permitidas", "") ?: ""
-                val appsList = if (appsStr.isNotEmpty()) appsStr.split(",") else emptyList()
+            val politicaAplicada = KioskPolicyManager.aplicar(this)
 
-                val paquetesAutorizados = mutableListOf(packageName)
-                paquetesAutorizados.addAll(appsList)
-
-                devicePolicyManager.setLockTaskPackages(componentName, paquetesAutorizados.toTypedArray())
-
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    val permisosCriticos = arrayOf(
-                        Manifest.permission.SEND_SMS, Manifest.permission.CAMERA,
-                        Manifest.permission.CALL_PHONE, Manifest.permission.READ_PHONE_STATE,
-                        Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.READ_CALL_LOG
-                    )
-                    for (permiso in permisosCriticos) {
-                        devicePolicyManager.setPermissionGrantState(componentName, packageName, permiso, DevicePolicyManager.PERMISSION_GRANT_STATE_GRANTED)
+            if (devicePolicyManager.isDeviceOwnerApp(packageName) && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                // Los permisos funcionales se conceden si es posible, pero NUNCA condicionan
+                // la seguridad LockTask del terminal.
+                val permisosFuncionales = arrayOf(
+                    Manifest.permission.SEND_SMS,
+                    Manifest.permission.CALL_PHONE,
+                    Manifest.permission.READ_PHONE_STATE,
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.READ_CALL_LOG
+                )
+                for (permiso in permisosFuncionales) {
+                    try {
+                        devicePolicyManager.setPermissionGrantState(
+                            componentName,
+                            packageName,
+                            permiso,
+                            DevicePolicyManager.PERMISSION_GRANT_STATE_GRANTED
+                        )
+                    } catch (e: Exception) {
+                        AppLog.warning("MDM permiso $permiso no concedido automáticamente: ${e.message}")
                     }
                 }
             }
-        } catch (e: Exception) { e.printStackTrace() }
+
+            if (!politicaAplicada) {
+                AppLog.warning("KIOSK -> política base no confirmada; revisar Device Owner en Panel IT.")
+            }
+        } catch (e: Exception) {
+            AppLog.error("KIOSK -> error configurando modo estricto: ${e.message}")
+        }
     }
 
     private fun esSeguroBloquearPantalla(): Boolean {
-        val permisosRequeridos = mutableListOf(
-            Manifest.permission.CALL_PHONE, Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.SEND_SMS, Manifest.permission.CAMERA,
-            Manifest.permission.ANSWER_PHONE_CALLS, Manifest.permission.READ_PHONE_STATE,
-            Manifest.permission.READ_CALL_LOG
-        )
-        val faltanPermisos = permisosRequeridos.any { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
-        val devicePolicyManager = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
-        val componentName = ComponentName(this, MyAdminReceiver::class.java)
-        val faltaAdmin = !devicePolicyManager.isAdminActive(componentName)
-        return !faltanPermisos && !faltaAdmin
+        if (MaintenanceModeManager.estaActivo(this)) return false
+
+        return try {
+            val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+            dpm.isDeviceOwnerApp(packageName) && dpm.isLockTaskPermitted(packageName)
+        } catch (e: Exception) {
+            AppLog.error("KIOSK -> no se pudo comprobar LockTask: ${e.message}")
+            false
+        }
+    }
+
+    private fun entrarEnKioscoSiPermitido(origen: String) {
+        if (MaintenanceModeManager.estaActivo(this)) {
+            AppLog.info("KIOSK -> LockTask omitido desde $origen por mantenimiento IT activo.")
+            return
+        }
+
+        if (esSeguroBloquearPantalla()) {
+            try {
+                startLockTask()
+                AppLog.success("KIOSK -> LockTask activo solicitado desde $origen.")
+            } catch (e: Exception) {
+                AppLog.error("KIOSK -> no se pudo activar LockTask desde $origen: ${e.message}")
+            }
+        } else {
+            AppLog.warning("KIOSK -> LockTask no permitido desde $origen; no se fuerza stopLockTask().")
+        }
     }
 
     override fun onResume() {
         super.onResume()
         forzarVolumenMaximo()
-        configurarModoKioscoEstricto()
-        if (esSeguroBloquearPantalla()) {
-            try { startLockTask() } catch (e: Exception) {}
+
+        if (MaintenanceModeManager.estaActivo(this)) {
+            MaintenanceModeManager.reprogramarSiActivo(this)
+            AppLog.info("IT MANTENIMIENTO -> onResume sin reactivar kiosco (${MaintenanceModeManager.descripcion(this)}).")
         } else {
-            try { stopLockTask() } catch (e: Exception) {}
+            configurarModoKioscoEstricto()
+            entrarEnKioscoSiPermitido("onResume")
         }
-        cargarIdentificacionYLogo()
-        cargarAgendaDesdeCache()
-        descargarAgendaNube(modoSilencioso = true)
+
+        // onCreate ya carga caché y lanza la primera sincronización. Evitamos repetir todo
+        // inmediatamente en el primer onResume, que antes duplicaba trabajo durante el arranque.
+        if (primeraReanudacion) {
+            primeraReanudacion = false
+        } else {
+            cargarIdentificacionYLogo()
+            cargarAgendaDesdeCache()
+            descargarAgendaNube(modoSilencioso = true)
+        }
+
         reiniciarTemporizadorInactividad()
     }
 
@@ -2018,13 +2958,9 @@ class MainActivity : AppCompatActivity() {
         try {
             val permisosRequeridos = mutableListOf(
                 Manifest.permission.CALL_PHONE, Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.SEND_SMS, Manifest.permission.CAMERA,
-                Manifest.permission.ANSWER_PHONE_CALLS, Manifest.permission.READ_PHONE_STATE,
-                Manifest.permission.READ_CALL_LOG
+                Manifest.permission.SEND_SMS, Manifest.permission.ANSWER_PHONE_CALLS,
+                Manifest.permission.READ_PHONE_STATE, Manifest.permission.READ_CALL_LOG
             )
-            if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
-                permisosRequeridos.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
-            }
             val pedir = permisosRequeridos.filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }.toTypedArray()
             if (pedir.isNotEmpty()) {
                 ActivityCompat.requestPermissions(this, pedir, 100)
@@ -2035,50 +2971,6 @@ class MainActivity : AppCompatActivity() {
     private fun configurarBotonSecreto() {
         findViewById<ImageView>(R.id.logoEmpresa)?.setOnLongClickListener { mostrarDialogoPIN(); true }
         findViewById<TextView>(R.id.tvUbicacionDispositivo)?.setOnLongClickListener { mostrarDialogoPIN(); true }
-    }
-
-    private fun configurarBotonRatones() {
-        findViewById<TextView>(R.id.tvBateria)?.setOnClickListener {
-            toquesBateria++
-            if (toquesBateria >= 4) { toquesBateria = 0; iniciarJuegoRatones() }
-        }
-    }
-
-    private fun configurarBromaJefe() {
-        findViewById<TextView>(R.id.tvWifi)?.setOnClickListener {
-            toquesWifi++
-            if (toquesWifi >= 5) { toquesWifi = 0; iniciarLlamadaJefe() }
-        }
-    }
-
-    private fun iniciarLlamadaJefe() {
-        AppLog.warning("Activada broma llamada del Jefe")
-        enviarAlertaIT("⚠️ ALERTA: Activada la broma de la llamada del JEFE.")
-        val layoutBase = findViewById<ImageView>(R.id.logoEmpresa)?.parent as? LinearLayout ?: return
-        layoutBase.removeAllViews(); layoutBase.setBackgroundColor(Color.BLACK)
-
-        val tvIncoming = TextView(this).apply {
-            text = "📞 Llamada Entrante...\n\nEL JEFE (DIRECCIÓN)"; setTextColor(Color.WHITE); textSize = 35f; gravity = Gravity.CENTER; setTypeface(null, Typeface.BOLD)
-            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 100, 0, 100) }
-        }
-        layoutBase.addView(tvIncoming)
-        val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
-        vibrator.vibrate(longArrayOf(0, 1000, 1000, 1000, 1000, 1000, 1000), -1)
-
-        val btnContestar = Button(this).apply {
-            text = "CONTESTAR"; setBackgroundColor(Color.parseColor("#00C853")); setTextColor(Color.WHITE); textSize = 24f; setPadding(40, 40, 40, 40)
-        }
-        layoutBase.addView(btnContestar)
-
-        btnContestar.setOnClickListener {
-            vibrator.cancel(); layoutBase.removeAllViews(); layoutBase.setBackgroundColor(Color.parseColor("#C8102E"))
-            val tvYell = TextView(this@MainActivity).apply {
-                text = "¡PONTE A TRABAJAR\nY DEJA DE JUGAR\nCON EL MÓVIL!\n\n🧀🧀🧀"; setTextColor(Color.WHITE); textSize = 40f; gravity = Gravity.CENTER; setTypeface(null, Typeface.BOLD)
-                layoutParams = LinearLayout.LayoutParams(-1, -1)
-            }
-            layoutBase.addView(tvYell)
-            handler.postDelayed({ recreate() }, 4000)
-        }
     }
 
     private fun enviarAlertaIT(mensajeBase: String) {
@@ -2154,14 +3046,13 @@ class MainActivity : AppCompatActivity() {
 
                 if (codigoMetido == "*###9999#" || codigoMetido == pinCorrecto) {
                     prefs.edit().putInt("intentos_fallidos_pin", 0).apply()
-                    try { stopLockTask() } catch (e: Exception) {}
 
+                    // Entrar al Panel IT NO debe liberar el kiosco. La única salida de producción
+                    // es el botón Modo Mantenimiento, que ejecuta la transición completa desde MainActivity.
                     if (codigoMetido == "*###9999#") {
-                        startActivity(Intent(Settings.ACTION_SETTINGS))
-                        finish()
-                    } else {
-                        startActivity(Intent(this, ItActivity::class.java))
+                        AppLog.warning("Acceso de emergencia al Panel IT utilizado. No se abre Ajustes directamente.")
                     }
+                    startActivity(Intent(this, ItActivity::class.java))
                 } else {
                     val intentos = prefs.getInt("intentos_fallidos_pin", 0) + 1
 
@@ -2179,134 +3070,14 @@ class MainActivity : AppCompatActivity() {
                         Toast.makeText(this, "❌ PIN Incorrecto. Intento $intentos/3", Toast.LENGTH_SHORT).show()
                     }
 
-                    iniciarHackeoConsola()
+                    AppLog.warning("Seguridad IT -> PIN incorrecto. Intento $intentos/3.")
+                    if (intentos >= 3) {
+                        enviarAlertaIT("⚠️ SEGURIDAD: Panel IT bloqueado tras 3 intentos de PIN incorrectos.")
+                    }
                 }
             }
             .setNegativeButton("Cancelar", null)
         builder.show()
-    }
-
-    private fun iniciarHackeoConsola() {
-        AppLog.warning("Intento fallido de PIN IT - Consola simulada")
-        enviarAlertaIT("⚠️ ALERTA: Intento de violación de seguridad en menú IT.")
-        val layoutBase = findViewById<ImageView>(R.id.logoEmpresa)?.parent as? LinearLayout ?: return
-        layoutBase.setBackgroundColor(Color.BLACK); layoutBase.removeAllViews()
-        (getSystemService(Context.VIBRATOR_SERVICE) as Vibrator).vibrate(2000)
-
-        val textoConsola = TextView(this).apply { setTextColor(Color.GREEN); textSize = 12f; typeface = Typeface.MONOSPACE; layoutParams = LinearLayout.LayoutParams(-1, -1) }
-        layoutBase.addView(textoConsola)
-        val logs = listOf("[ OK ] Booting...", "Unauthorized access!", "Bypassing firewall...", "[ERROR] System breach!", "Formatting storage...")
-        var logAcumulado = ""
-        runnableConsola = object : Runnable {
-            override fun run() { logAcumulado += logs.random() + "\n"; textoConsola.text = logAcumulado; handler.postDelayed(this, 300) }
-        }
-        handler.post(runnableConsola)
-
-        prepararCamaraOcultaYDisparar(layoutBase)
-        val mostrarWarning = { msg: String ->
-            val w = TextView(this).apply {
-                text = msg; setTextColor(Color.WHITE); setBackgroundColor(Color.parseColor("#C8102E"))
-                textSize = 18f; setTypeface(null, Typeface.BOLD); gravity = Gravity.CENTER; setPadding(40, 50, 40, 50)
-                layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(40, 40, 40, 0) }
-            }
-            layoutBase.addView(w, 0)
-        }
-        handler.postDelayed({ mostrarWarning("⚠️ INICIANDO CÁMARA FRONTAL...") }, 1500)
-        handler.postDelayed({ mostrarWarning("⚠️ COMUNICANDO A DIRECCIÓN...") }, 3000)
-
-        toquesSalida = 0
-        layoutBase.setOnClickListener { toquesSalida++; if (toquesSalida >= 5) { handler.removeCallbacksAndMessages(null); recreate() } }
-    }
-
-    private fun prepararCamaraOcultaYDisparar(layoutBase: LinearLayout) {
-        var mCamera: Camera? = null
-        try {
-            val info = Camera.CameraInfo()
-            var frontId = -1
-            for (i in 0 until Camera.getNumberOfCameras()) {
-                Camera.getCameraInfo(i, info)
-                if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) { frontId = i; break }
-            }
-            if (frontId != -1) {
-                mCamera = Camera.open(frontId)
-                val params = mCamera.parameters
-                val sizes = params.supportedPictureSizes
-                if (sizes.isNotEmpty()) { params.setPictureSize(sizes[0].width, sizes[0].height); mCamera.parameters = params }
-            }
-        } catch (e: Exception) {}
-
-        if (mCamera != null) {
-            val surfaceView = SurfaceView(this)
-            layoutBase.addView(surfaceView, 0, LinearLayout.LayoutParams(1, 1))
-            surfaceView.holder.addCallback(object : SurfaceHolder.Callback {
-                override fun surfaceCreated(holder: SurfaceHolder) {
-                    try {
-                        mCamera.setPreviewDisplay(holder); mCamera.startPreview()
-                        handler.postDelayed({
-                            try {
-                                mCamera.takePicture(null, null) { data, cam ->
-                                    cam.release()
-                                    val bmpBruto = BitmapFactory.decodeByteArray(data, 0, data.size)
-                                    val matrix = Matrix().apply { postRotate(270f) }
-                                    val bmpFinal = Bitmap.createBitmap(bmpBruto, 0, 0, bmpBruto.width, bmpBruto.height, matrix, true)
-                                    guardarBitmapEnGaleria(bmpFinal)
-                                    handler.postDelayed({
-                                        handler.removeCallbacks(runnableConsola)
-                                        mostrarPantallazoFinal(layoutBase, bmpFinal)
-                                    }, 4000)
-                                }
-                            } catch (e: Exception) {
-                                mCamera.release()
-                                handler.postDelayed({ handler.removeCallbacks(runnableConsola); mostrarPantallazoFinal(layoutBase, null) }, 4000)
-                            }
-                        }, 300)
-                    } catch (e: Exception) {
-                        mCamera.release()
-                        handler.postDelayed({ handler.removeCallbacks(runnableConsola); mostrarPantallazoFinal(layoutBase, null) }, 4000)
-                    }
-                }
-                override fun surfaceChanged(h: SurfaceHolder, f: Int, w: Int, hi: Int) {}
-                override fun surfaceDestroyed(h: SurfaceHolder) {}
-            })
-        } else {
-            handler.postDelayed({ handler.removeCallbacks(runnableConsola); mostrarPantallazoFinal(layoutBase, null) }, 4500)
-        }
-    }
-
-    private fun guardarBitmapEnGaleria(bitmap: Bitmap) {
-        try {
-            val values = ContentValues().apply { put(MediaStore.Images.Media.DISPLAY_NAME, "Intruso_${System.currentTimeMillis()}.jpg"); put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg") }
-            val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
-            uri?.let { contentResolver.openOutputStream(it)?.use { out -> bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out) } }
-        } catch (e: Exception) {}
-    }
-
-    private fun mostrarPantallazoFinal(layoutBase: LinearLayout, fotoCapturada: Bitmap?) {
-        layoutBase.removeAllViews(); layoutBase.setOnClickListener(null)
-        layoutBase.setBackgroundColor(Color.WHITE)
-        handler.postDelayed({
-            layoutBase.setBackgroundColor(Color.BLACK)
-            if (fotoCapturada != null) layoutBase.background = BitmapDrawable(resources, fotoCapturada)
-            val txt = TextView(this).apply {
-                text = "📸 CAPTURA GUARDADA\n\nTu identidad ha sido registrada.\n\n¡Isso no se hace!"; setTextColor(Color.RED); textSize = 24f; setTypeface(null, Typeface.BOLD); gravity = Gravity.CENTER; setPadding(40, 40, 40, 40); setBackgroundColor(Color.parseColor("#CC000000")); layoutParams = LinearLayout.LayoutParams(-1, -1)
-            }
-            layoutBase.addView(txt)
-            handler.postDelayed({ recreate() }, 6000)
-        }, 150)
-    }
-
-    private fun iniciarJuegoRatones() {
-        AppLog.info("Iniciado juego de ratones")
-        val layoutBase = findViewById<ImageView>(R.id.logoEmpresa)?.parent as? LinearLayout ?: return
-        layoutBase.removeAllViews(); layoutBase.setBackgroundColor(Color.parseColor("#F5DEB3"))
-        val frame = FrameLayout(this).apply { layoutParams = LinearLayout.LayoutParams(-1, -1) }
-        layoutBase.addView(frame)
-        var vivos = 15; val random = java.util.Random()
-        for (i in 0 until 15) {
-            val r = TextView(this).apply { text = "🐁"; textSize = 50f; x = random.nextInt(400).toFloat(); y = random.nextInt(800).toFloat() }
-            r.setOnClickListener { frame.removeView(r); vivos--; if (vivos <= 0) recreate() }
-            frame.addView(r)
-        }
     }
 
     private var dialogoOTA: Dialog? = null
@@ -2449,7 +3220,24 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun comprobarActualizacionOTA() {
+    private fun comprobarActualizacionOTA(forzada: Boolean = false) {
+        if (OtaRuntimeState.enCurso) {
+            AppLog.warning(
+                "OTA -> comprobación ignorada porque ya existe una OTA en curso " +
+                        "hacia v${OtaRuntimeState.versionObjetivo}."
+            )
+            if (forzada) {
+                runOnUiThread {
+                    Toast.makeText(
+                        this,
+                        "⏳ Ya hay una actualización OTA en curso.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+            return
+        }
+
         val client = OkHttpClient.Builder()
             .followRedirects(true)
             .followSslRedirects(true)
@@ -2461,6 +3249,15 @@ class MainActivity : AppCompatActivity() {
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
                 AppLog.error("OTA Error Red consultando version.json: ${e.message}")
+                if (forzada) {
+                    runOnUiThread {
+                        Toast.makeText(
+                            this@MainActivity,
+                            "❌ No se pudo consultar la OTA. Revisa la conexión.",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
             }
 
             override fun onResponse(call: Call, response: Response) {
@@ -2468,6 +3265,15 @@ class MainActivity : AppCompatActivity() {
                     val jsonStr = response.body?.string()
                     if (!response.isSuccessful || jsonStr.isNullOrEmpty()) {
                         AppLog.error("OTA JSON Falló: HTTP ${response.code}")
+                        if (forzada) {
+                            runOnUiThread {
+                                Toast.makeText(
+                                    this@MainActivity,
+                                    "❌ El servidor OTA devolvió HTTP ${response.code}.",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        }
                         return
                     }
 
@@ -2483,22 +3289,52 @@ class MainActivity : AppCompatActivity() {
                         pInfo.versionCode
                     }
 
-                    AppLog.info("OTA Check -> Local: $versionActual | Nube: $versionNube")
+                    AppLog.info(
+                        "OTA Check -> Local=$versionActual | Nube=$versionNube | Manual=$forzada"
+                    )
 
                     if (versionNube > versionActual) {
-                        AppLog.ota("Versión nueva detectada en nube (v$versionNube). Descargando APK desde: $apkUrl")
-                        descargarYInstalarAPK(apkUrl)
+                        if (!OtaRuntimeState.intentarIniciar(versionNube)) {
+                            AppLog.warning("OTA -> otro proceso se adelantó e inició la actualización.")
+                            return
+                        }
+
+                        AppLog.ota(
+                            "===== INICIO OTA v$versionActual -> v$versionNube ====="
+                        )
+                        AppLog.ota("URL APK: $apkUrl")
+                        descargarYInstalarAPK(apkUrl, versionNube)
                     } else {
-                        AppLog.success("Aplicación al día (Local: $versionActual >= Nube: $versionNube).")
+                        AppLog.success(
+                            "Aplicación al día (Local: $versionActual >= Nube: $versionNube)."
+                        )
+                        if (forzada) {
+                            runOnUiThread {
+                                Toast.makeText(
+                                    this@MainActivity,
+                                    "✅ Launcher TGT ya está actualizado (v$versionActual).",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        }
                     }
                 } catch (e: Exception) {
                     AppLog.error("Excepción procesando JSON OTA: ${e.message}")
+                    if (forzada) {
+                        runOnUiThread {
+                            Toast.makeText(
+                                this@MainActivity,
+                                "❌ Error procesando la información OTA.",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    }
                 }
             }
         })
     }
 
-    private fun descargarYInstalarAPK(url: String) {
+    private fun descargarYInstalarAPK(url: String, versionEsperada: Int) {
         mostrarPantallaOTA()
 
         val client = OkHttpClient.Builder()
@@ -2509,121 +3345,331 @@ class MainActivity : AppCompatActivity() {
         val request = Request.Builder().url(url).build()
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
+                OtaRuntimeState.finalizar()
                 AppLog.error("Error de red descargando APK: ${e.message}")
                 actualizarProgresoOTA(0, "Error de red al descargar. Reintentando luego.", false)
-                handler.postDelayed({ runOnUiThread { try { dialogoOTA?.dismiss() } catch(e:Exception){} } }, 4000)
+                handler.postDelayed({
+                    runOnUiThread {
+                        try { dialogoOTA?.dismiss() } catch (_: Exception) {}
+                    }
+                }, 4000)
             }
 
             override fun onResponse(call: Call, response: Response) {
                 try {
                     if (!response.isSuccessful) {
+                        OtaRuntimeState.finalizar()
                         AppLog.error("Error HTTP descargando APK: Código ${response.code}")
                         actualizarProgresoOTA(0, "Error en el servidor de descargas.", false)
-                        handler.postDelayed({ runOnUiThread { try { dialogoOTA?.dismiss() } catch(e:Exception){} } }, 4000)
+                        handler.postDelayed({
+                            runOnUiThread {
+                                try { dialogoOTA?.dismiss() } catch (_: Exception) {}
+                            }
+                        }, 4000)
                         return
                     }
 
                     val body = response.body
                     if (body == null) {
+                        OtaRuntimeState.finalizar()
                         AppLog.error("Error crítico: El cuerpo de respuesta está vacío")
+                        actualizarProgresoOTA(0, "La descarga OTA llegó vacía.", false)
                         return
                     }
 
                     val file = File(getExternalFilesDir(null), "update.apk")
-                    val inputStream = body.byteStream()
-                    val outputStream = FileOutputStream(file)
                     val contentLength = body.contentLength()
 
-                    val buffer = ByteArray(8 * 1024)
-                    var bytesRead: Int
-                    var totalBytesRead: Long = 0
+                    body.byteStream().use { inputStream ->
+                        FileOutputStream(file).use { outputStream ->
+                            val buffer = ByteArray(8 * 1024)
+                            var bytesRead: Int
+                            var totalBytesRead: Long = 0
 
-                    while (inputStream.read(buffer).also { bytesRead = it } != -1) {
-                        outputStream.write(buffer, 0, bytesRead)
-                        totalBytesRead += bytesRead
+                            while (inputStream.read(buffer).also { bytesRead = it } != -1) {
+                                outputStream.write(buffer, 0, bytesRead)
+                                totalBytesRead += bytesRead
 
-                        val mbLeidos = String.format(Locale.US, "%.2f", totalBytesRead / (1024.0 * 1024.0))
+                                val mbLeidos = String.format(
+                                    Locale.US,
+                                    "%.2f",
+                                    totalBytesRead / (1024.0 * 1024.0)
+                                )
 
-                        if (contentLength > 0) {
-                            val progreso = ((totalBytesRead * 100) / contentLength).toInt()
-                            val mbTotales = String.format(Locale.US, "%.2f", contentLength / (1024.0 * 1024.0))
-                            actualizarProgresoOTA(progreso, "Descargando actualización... $progreso%\n($mbLeidos MB / $mbTotales MB)", false)
-                        } else {
-                            actualizarProgresoOTA(0, "Descargando actualización...\n($mbLeidos MB descargados)", true)
+                                if (contentLength > 0) {
+                                    val progreso = ((totalBytesRead * 100) / contentLength).toInt()
+                                    val mbTotales = String.format(
+                                        Locale.US,
+                                        "%.2f",
+                                        contentLength / (1024.0 * 1024.0)
+                                    )
+                                    actualizarProgresoOTA(
+                                        progreso,
+                                        "Descargando actualización... $progreso%\n($mbLeidos MB / $mbTotales MB)",
+                                        false
+                                    )
+                                } else {
+                                    actualizarProgresoOTA(
+                                        0,
+                                        "Descargando actualización...\n($mbLeidos MB descargados)",
+                                        true
+                                    )
+                                }
+                            }
+                            outputStream.flush()
                         }
                     }
 
-                    outputStream.flush()
-                    outputStream.close()
-                    inputStream.close()
+                    AppLog.success(
+                        "OTA -> APK descargado (${file.length()} bytes). Validando paquete y versión..."
+                    )
+                    actualizarProgresoOTA(
+                        100,
+                        "🔎 Validando actualización antes de instalar...",
+                        true
+                    )
 
-                    AppLog.success("APK descargado con éxito (${file.length()} bytes). Iniciando PackageInstaller...")
-                    actualizarProgresoOTA(100, "⚙️ Instalando nueva versión en segundo plano...\nNo apague el dispositivo.", true)
+                    if (!validarApkDescargado(file, versionEsperada)) {
+                        OtaRuntimeState.finalizar()
+                        try { file.delete() } catch (_: Exception) {}
+                        actualizarProgresoOTA(
+                            0,
+                            "❌ APK rechazada: paquete o versión incorrectos.",
+                            false
+                        )
+                        handler.postDelayed({
+                            runOnUiThread {
+                                try { dialogoOTA?.dismiss() } catch (_: Exception) {}
+                            }
+                        }, 5000)
+                        return
+                    }
+
+                    actualizarProgresoOTA(
+                        100,
+                        "⚙️ Instalando nueva versión...\nNo apague el dispositivo.",
+                        true
+                    )
                     instalarApkSilenciosa(file)
 
                 } catch (e: Exception) {
-                    AppLog.error("Excepción guardando archivo APK local: ${e.message}")
-                    actualizarProgresoOTA(0, "Error al guardar el archivo.", false)
-                    handler.postDelayed({ runOnUiThread { try { dialogoOTA?.dismiss() } catch(e:Exception){} } }, 4000)
+                    OtaRuntimeState.finalizar()
+                    AppLog.error("Excepción guardando/validando APK OTA: ${e.message}")
+                    actualizarProgresoOTA(0, "Error preparando la actualización.", false)
+                    handler.postDelayed({
+                        runOnUiThread {
+                            try { dialogoOTA?.dismiss() } catch (_: Exception) {}
+                        }
+                    }, 4000)
                 }
             }
         })
     }
 
+    private fun validarApkDescargado(apkFile: File, versionEsperada: Int): Boolean {
+        return try {
+            val packageInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                packageManager.getPackageArchiveInfo(
+                    apkFile.absolutePath,
+                    PackageManager.PackageInfoFlags.of(0L)
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                packageManager.getPackageArchiveInfo(apkFile.absolutePath, 0)
+            }
+
+            if (packageInfo == null) {
+                AppLog.error("OTA VALIDACIÓN -> Android no puede interpretar el APK descargado.")
+                return false
+            }
+
+            val apkPackage = packageInfo.packageName
+            val apkVersionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                packageInfo.longVersionCode
+            } else {
+                @Suppress("DEPRECATION")
+                packageInfo.versionCode.toLong()
+            }
+
+            val instalada = packageManager.getPackageInfo(packageName, 0)
+            val versionLocal = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                instalada.longVersionCode
+            } else {
+                @Suppress("DEPRECATION")
+                instalada.versionCode.toLong()
+            }
+
+            AppLog.info(
+                "OTA VALIDACIÓN -> Package=$apkPackage | APKVersion=$apkVersionCode | " +
+                        "Esperada=$versionEsperada | Local=$versionLocal | Bytes=${apkFile.length()}"
+            )
+
+            when {
+                apkPackage != packageName -> {
+                    AppLog.error(
+                        "OTA RECHAZADA -> package incorrecto. Esperado=$packageName Recibido=$apkPackage"
+                    )
+                    false
+                }
+                apkVersionCode != versionEsperada.toLong() -> {
+                    AppLog.error(
+                        "OTA RECHAZADA -> versionCode del APK ($apkVersionCode) no coincide con version.json ($versionEsperada)."
+                    )
+                    false
+                }
+                apkVersionCode <= versionLocal -> {
+                    AppLog.error(
+                        "OTA RECHAZADA -> el APK no es una versión superior a la instalada."
+                    )
+                    false
+                }
+                else -> {
+                    AppLog.success(
+                        "OTA VALIDACIÓN OK -> package y versionCode correctos. Preparada para PackageInstaller."
+                    )
+                    true
+                }
+            }
+        } catch (e: Exception) {
+            AppLog.error(
+                "OTA VALIDACIÓN -> excepción leyendo metadata del APK: ${e.javaClass.simpleName}: ${e.message}"
+            )
+            false
+        }
+    }
+
     private fun instalarApkSilenciosa(apkFile: File) {
         try {
+            if (!apkFile.exists() || apkFile.length() <= 0L) {
+                OtaRuntimeState.finalizar()
+                AppLog.error("OTA -> APK local inexistente o vacío: ${apkFile.absolutePath}")
+                actualizarProgresoOTA(0, "El APK descargado no es válido.", false)
+                return
+            }
+
             val packageInstaller = packageManager.packageInstaller
 
+            // Limpiamos sesiones antiguas pertenecientes a esta aplicación para no dejar
+            // instalaciones huérfanas de intentos OTA anteriores.
             try {
                 val sessions = packageInstaller.mySessions
                 for (sessionInfo in sessions) {
                     try {
                         val openSession = packageInstaller.openSession(sessionInfo.sessionId)
                         openSession.abandon()
-                        AppLog.ota("Sesión PackageInstaller anterior (${sessionInfo.sessionId}) abortada correctamente.")
-                    } catch (e: Exception) {}
+                        AppLog.ota(
+                            "Sesión PackageInstaller anterior (${sessionInfo.sessionId}) abortada correctamente."
+                        )
+                    } catch (_: Exception) {
+                    }
                 }
-            } catch (e: Exception) {}
+            } catch (e: Exception) {
+                AppLog.warning("OTA -> no se pudieron revisar sesiones anteriores: ${e.message}")
+            }
 
-            val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
-            params.setAppPackageName(packageName)
+            val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+            val esDeviceOwner = dpm.isDeviceOwnerApp(packageName)
+            val puedeSolicitarInstalaciones =
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    packageManager.canRequestPackageInstalls()
+                } else {
+                    true
+                }
+
+            val params = PackageInstaller.SessionParams(
+                PackageInstaller.SessionParams.MODE_FULL_INSTALL
+            ).apply {
+                setAppPackageName(packageName)
+                setSize(apkFile.length())
+
+                // Android 12+ permite indicar que preferimos una actualización sin intervención.
+                // Si Android no puede concederla, devolverá STATUS_PENDING_USER_ACTION y el
+                // ApkInstallReceiver abrirá correctamente la pantalla de confirmación.
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    setRequireUserAction(
+                        PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED
+                    )
+                }
+            }
+
+            AppLog.info(
+                "OTA PackageInstaller PRE-COMMIT -> " +
+                        "DeviceOwner=$esDeviceOwner | " +
+                        "CanRequestInstalls=$puedeSolicitarInstalaciones | " +
+                        "AndroidAPI=${Build.VERSION.SDK_INT} | " +
+                        "TargetSDK=${applicationInfo.targetSdkVersion} | " +
+                        "APKBytes=${apkFile.length()} | " +
+                        "RequireUserAction=${if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) "NOT_REQUIRED" else "DEFAULT"}"
+            )
+
             val sessionId = packageInstaller.createSession(params)
             val session = packageInstaller.openSession(sessionId)
 
-            val out = session.openWrite("LauncherUpdate", 0, apkFile.length())
-            val fis = FileInputStream(apkFile)
-            val buffer = ByteArray(65536)
-            var length: Int
-            while (fis.read(buffer).also { length = it } != -1) {
-                out.write(buffer, 0, length)
+            try {
+                session.openWrite("LauncherUpdate", 0, apkFile.length()).use { out ->
+                    FileInputStream(apkFile).use { fis ->
+                        val buffer = ByteArray(65536)
+                        var length: Int
+
+                        while (fis.read(buffer).also { length = it } != -1) {
+                            out.write(buffer, 0, length)
+                        }
+
+                        session.fsync(out)
+                    }
+                }
+
+                var pendingFlags = PendingIntent.FLAG_UPDATE_CURRENT
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    // PackageInstaller necesita poder rellenar los EXTRA_STATUS del PendingIntent.
+                    pendingFlags = PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                }
+
+                val callbackIntent = Intent(this, ApkInstallReceiver::class.java).apply {
+                    action = "com.grupotgt.launcherkioscotgt.INSTALL_COMPLETE"
+                    putExtra("ota_session_id", sessionId)
+                }
+
+                val pendingIntent = PendingIntent.getBroadcast(
+                    this,
+                    sessionId,
+                    callbackIntent,
+                    pendingFlags
+                )
+
+                session.commit(pendingIntent.intentSender)
+
+                AppLog.ota(
+                    "Sesión de PackageInstaller enviada a Android con éxito. " +
+                            "Session=$sessionId. Esperando callback..."
+                )
+            } catch (e: Exception) {
+                try {
+                    session.abandon()
+                } catch (_: Exception) {
+                }
+                throw e
+            } finally {
+                try {
+                    session.close()
+                } catch (_: Exception) {
+                }
             }
-            session.fsync(out)
-            out.close()
-            fis.close()
-
-            var flagMutable = PendingIntent.FLAG_UPDATE_CURRENT
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                flagMutable = PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-            }
-
-            val intent = Intent(this, ApkInstallReceiver::class.java).apply {
-                action = "com.grupotgt.launcherkioscotgt.INSTALL_COMPLETE"
-            }
-
-            val pendingIntent = PendingIntent.getBroadcast(
-                this,
-                0,
-                intent,
-                flagMutable
-            )
-
-            session.commit(pendingIntent.intentSender)
-            AppLog.ota("Sesión de PackageInstaller enviada a Android con éxito. Esperando broadcast...")
 
         } catch (e: Exception) {
-            AppLog.error("Fallo crítico al invocar PackageInstaller: ${e.message}")
+            OtaRuntimeState.finalizar()
+            AppLog.error(
+                "Fallo crítico al invocar PackageInstaller: ${e.javaClass.simpleName}: ${e.message}"
+            )
             actualizarProgresoOTA(0, "Fallo al iniciar la instalación.", false)
-            handler.postDelayed({ runOnUiThread { try { dialogoOTA?.dismiss() } catch(e:Exception){} } }, 4000)
+            handler.postDelayed({
+                runOnUiThread {
+                    try {
+                        dialogoOTA?.dismiss()
+                    } catch (_: Exception) {
+                    }
+                }
+            }, 4000)
         }
     }
 
