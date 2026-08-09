@@ -2,6 +2,7 @@ package com.grupotgt.launcherkioscotgt
 
 import android.Manifest
 import android.app.ActivityManager
+import android.app.Dialog
 import android.app.admin.DevicePolicyManager
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -9,9 +10,10 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.GradientDrawable
 import android.graphics.Typeface
 import android.media.AudioManager
-import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.BatteryManager
 import android.os.Build
@@ -25,6 +27,9 @@ import android.provider.Settings
 import android.telephony.TelephonyManager
 import android.telephony.SmsManager
 import android.view.Gravity
+import android.view.View
+import android.view.Window
+import android.view.WindowManager
 import android.widget.ArrayAdapter
 import android.widget.AutoCompleteTextView
 import android.widget.Button
@@ -37,7 +42,6 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import androidx.core.content.FileProvider
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -75,7 +79,7 @@ class ItActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_it)
 
-        // V63: Panel IT retro-terminal. Edge-to-edge controlado para respetar
+        // V64: Panel IT retro-terminal + Wi-Fi/Logs unificados. Edge-to-edge controlado para respetar
         // de forma real los márgenes superiores e inferiores en Android 15/16.
         val rootScroll = findViewById<ScrollView>(R.id.itRootScroll)
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -473,7 +477,7 @@ class ItActivity : AppCompatActivity() {
 
         // OTA: se conserva el motor único de MainActivity. No se duplica PackageInstaller.
         btnForzarOTA.setOnClickListener {
-            AppLog.registrar("OTA manual solicitada desde Panel IT V63")
+            AppLog.registrar("OTA manual solicitada desde Panel IT V64")
             Toast.makeText(this, "Abriendo motor OTA del Launcher...", Toast.LENGTH_SHORT).show()
             val otaIntent = Intent(this, MainActivity::class.java).apply {
                 putExtra(MainActivity.EXTRA_FORZAR_OTA, true)
@@ -632,47 +636,105 @@ class ItActivity : AppCompatActivity() {
     }
 
     private fun mostrarAnalizadorWifi() {
-        val dialogView = LinearLayout(this).apply {
+        val verde = Color.parseColor("#9CFF9F")
+        val verdeSuave = Color.parseColor("#B9F7C1")
+        val verdePanel = Color.parseColor("#0A1F0E")
+        val amarillo = Color.parseColor("#FFE58A")
+        val rojo = Color.parseColor("#FF7B7B")
+
+        val dialog = Dialog(this)
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
+
+        val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(50, 50, 50, 50)
-            gravity = Gravity.CENTER
-            setBackgroundColor(Color.parseColor("#061008"))
+            setPadding(dp(16), dp(18), dp(16), dp(18))
+            background = fondoRetro(Color.parseColor("#020704"), verde, 0, 1)
         }
 
-        val tvInfo = TextView(this).apply {
-            setTextColor(Color.parseColor("#B9F7C1"))
-            typeface = Typeface.MONOSPACE
-            textSize = 15f
-            gravity = Gravity.CENTER
-            setLineSpacing(0f, 1.2f)
-        }
+        root.addView(textoRetro("// ANALIZADOR DE RED", 23f, verde, true, Gravity.CENTER))
+        root.addView(textoRetro("TGT NET-SCAN 64  ·  DIAGNÓSTICO EN TIEMPO REAL", 11f, Color.parseColor("#6FCB78"), false, Gravity.CENTER).apply {
+            setPadding(0, dp(3), 0, dp(14))
+        })
 
+        val cardEstado = tarjetaRetro(verdePanel, verde)
+        val tvEstado = textoRetro("ESCANEANDO RED...", 16f, amarillo, true, Gravity.CENTER)
         val barraSenal = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 100
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 40).apply {
-                setMargins(0, 40, 0, 40)
+            progress = 0
+            progressTintList = android.content.res.ColorStateList.valueOf(verde)
+            progressBackgroundTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#14321A"))
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(18)).apply {
+                setMargins(0, dp(12), 0, dp(12))
             }
         }
+        val tvSenalGrande = textoRetro("-- dBm", 34f, verde, true, Gravity.CENTER)
+        val tvCalidad = textoRetro("CALIDAD: --", 14f, verdeSuave, true, Gravity.CENTER)
 
-        val tvEstado = TextView(this).apply {
-            setTextColor(Color.parseColor("#FFE58A"))
-            typeface = Typeface.MONOSPACE
-            textSize = 13f
-            gravity = Gravity.CENTER
-            text = "Analizando espectro de red..."
+        cardEstado.addView(tvEstado)
+        cardEstado.addView(tvSenalGrande)
+        cardEstado.addView(barraSenal)
+        cardEstado.addView(tvCalidad)
+        root.addView(cardEstado)
+
+        val cardDatos = tarjetaRetro(Color.parseColor("#061008"), Color.parseColor("#2B7D39")).apply {
+            val p = dp(13)
+            setPadding(p, p, p, p)
         }
+        val tvDatos = textoRetro("SSID          --\nIP            --\nBANDA         --\nCANAL         --\nENLACE        --", 14f, verdeSuave, false, Gravity.START).apply {
+            setLineSpacing(0f, 1.35f)
+        }
+        cardDatos.addView(tvDatos)
+        root.addView(cardDatos)
 
-        dialogView.addView(tvInfo)
-        dialogView.addView(barraSenal)
-        dialogView.addView(tvEstado)
+        val cardInternet = tarjetaRetro(Color.parseColor("#061008"), Color.parseColor("#2B7D39")).apply {
+            val p = dp(13)
+            setPadding(p, p, p, p)
+        }
+        val tvInternet = textoRetro("SALIDA INTERNET     PENDIENTE\nLATENCIA            --", 13f, amarillo, false, Gravity.START)
+        cardInternet.addView(tvInternet)
+        root.addView(cardInternet)
 
-        val dialog = AlertDialog.Builder(this)
-            .setTitle("DIAGNOSTICO WIFI // TGT")
-            .setView(dialogView)
-            .setPositiveButton("Cerrar", null)
-            .create()
+        val filaAcciones = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(0, dp(10), 0, 0)
+        }
+        val btnTest = botonRetro("TEST RED", false)
+        val btnCerrar = botonRetro("CERRAR", true)
+        filaAcciones.addView(btnTest, LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginEnd = dp(6) })
+        filaAcciones.addView(btnCerrar, LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginStart = dp(6) })
+        root.addView(filaAcciones)
 
+        root.addView(textoRetro("Creado por Marco Carpi\nMadecem.com", 10f, Color.parseColor("#6FCB78"), false, Gravity.CENTER).apply {
+            setPadding(0, dp(12), 0, 0)
+        })
+
+        dialog.setContentView(root)
+        dialog.window?.apply {
+            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            attributes = attributes.apply { dimAmount = 0.86f }
+        }
         dialog.show()
+        dialog.window?.let { ventana ->
+            ventana.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT)
+            WindowCompat.setDecorFitsSystemWindows(ventana, false)
+            val baseLeft = root.paddingLeft
+            val baseTop = root.paddingTop
+            val baseRight = root.paddingRight
+            val baseBottom = root.paddingBottom
+            ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+                val barras = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+                view.setPadding(
+                    baseLeft + barras.left,
+                    baseTop + barras.top,
+                    baseRight + barras.right,
+                    baseBottom + barras.bottom
+                )
+                insets
+            }
+            ViewCompat.requestApplyInsets(root)
+        }
 
         val handler = Handler(Looper.getMainLooper())
         val updateTask = object : Runnable {
@@ -681,62 +743,171 @@ class ItActivity : AppCompatActivity() {
 
                 try {
                     val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
+                    @Suppress("DEPRECATION")
                     val wifiInfo = wifiManager?.connectionInfo
 
                     val rssi = wifiInfo?.rssi ?: -100
-                    val ssid = wifiInfo?.ssid?.replace("\"", "") ?: "Desconectado"
+                    val ssidRaw = wifiInfo?.ssid?.replace("\"", "") ?: "--"
+                    val ssid = if (ssidRaw == "<unknown ssid>") "SIN IDENTIFICAR" else ssidRaw
                     val linkSpeed = wifiInfo?.linkSpeed ?: 0
-
-                    val quality = WifiManager.calculateSignalLevel(rssi, 100)
+                    val frecuencia = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) wifiInfo?.frequency ?: 0 else 0
+                    val quality = WifiManager.calculateSignalLevel(rssi, 100).coerceIn(0, 100)
 
                     val estado = when {
-                        rssi > -50 -> "Excelente (Ideal para OTA y Sincro)"
-                        rssi in -50 downTo -65 -> "Buena (Conexión estable)"
-                        rssi in -66 downTo -75 -> "Regular (Posibles cortes)"
-                        else -> "Pobre (¡Revisar cobertura / antenas!)"
+                        rssi >= -50 -> Triple("EXCELENTE", verde, "IDEAL PARA OTA / SINCRO")
+                        rssi >= -65 -> Triple("BUENA", verde, "CONEXIÓN ESTABLE")
+                        rssi >= -75 -> Triple("REGULAR", amarillo, "VIGILAR COBERTURA")
+                        else -> Triple("POBRE", rojo, "REVISAR COBERTURA")
                     }
 
-                    var ipLocal = "127.0.0.1"
+                    var ipLocal = "--"
                     try {
+                        @Suppress("DEPRECATION")
                         val ip = wifiInfo?.ipAddress ?: 0
-                        ipLocal = String.format("%d.%d.%d.%d", (ip and 0xff), (ip shr 8 and 0xff), (ip shr 16 and 0xff), (ip shr 24 and 0xff))
-                    } catch (e: Exception) {}
-
-                    tvInfo.text = "SSID        $ssid\n" +
-                            "RSSI        $rssi dBm\n" +
-                            "ENLACE      $linkSpeed Mbps\n" +
-                            "IP          $ipLocal"
-
-                    barraSenal.progress = quality
-                    tvEstado.text = "Estado: $estado"
-
-                    if (quality > 70) {
-                        tvEstado.setTextColor(Color.parseColor("#00E676"))
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                            barraSenal.progressTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#00E676"))
+                        if (ip != 0) {
+                            ipLocal = String.format(
+                                Locale.US,
+                                "%d.%d.%d.%d",
+                                (ip and 0xff),
+                                (ip shr 8 and 0xff),
+                                (ip shr 16 and 0xff),
+                                (ip shr 24 and 0xff)
+                            )
                         }
-                    } else if (quality > 40) {
-                        tvEstado.setTextColor(Color.parseColor("#FFCA28"))
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                            barraSenal.progressTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#FFCA28"))
-                        }
-                    } else {
-                        tvEstado.setTextColor(Color.parseColor("#FF5252"))
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                            barraSenal.progressTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#FF5252"))
-                        }
+                    } catch (_: Exception) {}
+
+                    val banda = when {
+                        frecuencia in 2400..2500 -> "2.4 GHz"
+                        frecuencia in 4900..5900 -> "5 GHz"
+                        frecuencia in 5925..7125 -> "6 GHz"
+                        else -> "--"
                     }
+                    val canal = canalWifi(frecuencia)
 
+                    tvSenalGrande.text = "$rssi dBm"
+                    barraSenal.progress = quality
+                    barraSenal.progressTintList = android.content.res.ColorStateList.valueOf(estado.second)
+                    tvCalidad.text = "CALIDAD: ${estado.first}  ·  ${estado.third}"
+                    tvCalidad.setTextColor(estado.second)
+                    tvEstado.text = if (ssid == "--" || ssid == "SIN IDENTIFICAR") "SIN RED WIFI IDENTIFICADA" else "ENLACE WIFI ACTIVO"
+                    tvEstado.setTextColor(if (ssid == "--" || ssid == "SIN IDENTIFICAR") amarillo else verde)
+                    tvDatos.text =
+                        "SSID          $ssid\n" +
+                                "IP            $ipLocal\n" +
+                                "BANDA         $banda\n" +
+                                "CANAL         $canal\n" +
+                                "ENLACE        ${linkSpeed} Mbps"
                 } catch (e: Exception) {
-                    tvInfo.text = "Error al leer hardware Wi-Fi."
+                    tvEstado.text = "ERROR DE TELEMETRÍA WIFI"
+                    tvEstado.setTextColor(rojo)
+                    tvDatos.text = "No se pudo leer el hardware Wi-Fi.\n${e.message ?: "Sin detalle"}"
                 }
 
-                // Refrescar en tiempo real cada 1 segundo
-                handler.postDelayed(this, 1000)
+                handler.postDelayed(this, 1000L)
             }
         }
 
+        btnTest.setOnClickListener {
+            tvInternet.text = "SALIDA INTERNET     COMPROBANDO...\nLATENCIA            --"
+            tvInternet.setTextColor(amarillo)
+            AppLog.registrar("IT NET-SCAN: test de salida a Internet solicitado")
+
+            val client = OkHttpClient.Builder()
+                .connectTimeout(4, TimeUnit.SECONDS)
+                .readTimeout(4, TimeUnit.SECONDS)
+                .build()
+            val request = Request.Builder().url("https://www.google.com/generate_204").build()
+            val inicio = System.currentTimeMillis()
+
+            client.newCall(request).enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    AppLog.registrar("IT NET-SCAN: sin salida a Internet (${e.message})")
+                    runOnUiThread {
+                        if (dialog.isShowing) {
+                            tvInternet.text = "SALIDA INTERNET     ERROR\nLATENCIA            --\nDETALLE             ${e.message ?: "SIN RESPUESTA"}"
+                            tvInternet.setTextColor(rojo)
+                        }
+                    }
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    val latencia = System.currentTimeMillis() - inicio
+                    response.close()
+                    AppLog.registrar("IT NET-SCAN: salida a Internet OK (${latencia}ms)")
+                    runOnUiThread {
+                        if (dialog.isShowing) {
+                            tvInternet.text = "SALIDA INTERNET     ONLINE\nLATENCIA            ${latencia} ms"
+                            tvInternet.setTextColor(if (latencia > 500) amarillo else verde)
+                        }
+                    }
+                }
+            })
+        }
+
+        btnCerrar.setOnClickListener { dialog.dismiss() }
+        dialog.setOnDismissListener { handler.removeCallbacks(updateTask) }
         handler.post(updateTask)
+    }
+
+    private fun dp(valor: Int): Int = (valor * resources.displayMetrics.density).toInt()
+
+    private fun fondoRetro(
+        relleno: Int,
+        borde: Int,
+        radioDp: Int = 12,
+        grosorDp: Int = 1
+    ): GradientDrawable = GradientDrawable().apply {
+        shape = GradientDrawable.RECTANGLE
+        setColor(relleno)
+        setStroke(dp(grosorDp), borde)
+        cornerRadius = dp(radioDp).toFloat()
+    }
+
+    private fun textoRetro(
+        contenido: String,
+        tamanoSp: Float,
+        color: Int,
+        negrita: Boolean = false,
+        gravedad: Int = Gravity.START
+    ): TextView = TextView(this).apply {
+        text = contenido
+        textSize = tamanoSp
+        setTextColor(color)
+        typeface = Typeface.create(Typeface.MONOSPACE, if (negrita) Typeface.BOLD else Typeface.NORMAL)
+        gravity = gravedad
+        includeFontPadding = false
+    }
+
+    private fun tarjetaRetro(relleno: Int, borde: Int): LinearLayout = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(dp(14), dp(14), dp(14), dp(14))
+        background = fondoRetro(relleno, borde, 12, 1)
+        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            setMargins(0, dp(6), 0, dp(6))
+        }
+    }
+
+    private fun botonRetro(texto: String, principal: Boolean): Button = Button(this).apply {
+        text = texto
+        textSize = 12f
+        isAllCaps = false
+        setTextColor(if (principal) Color.parseColor("#021006") else Color.parseColor("#9CFF9F"))
+        typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+        background = fondoRetro(
+            if (principal) Color.parseColor("#9CFF9F") else Color.parseColor("#07150A"),
+            Color.parseColor("#58E76C"),
+            9,
+            1
+        )
+        setPadding(dp(8), 0, dp(8), 0)
+    }
+
+    private fun canalWifi(frecuenciaMhz: Int): String = when {
+        frecuenciaMhz == 2484 -> "14"
+        frecuenciaMhz in 2412..2472 -> ((frecuenciaMhz - 2407) / 5).toString()
+        frecuenciaMhz in 5000..5895 -> ((frecuenciaMhz - 5000) / 5).toString()
+        frecuenciaMhz in 5955..7115 -> ((frecuenciaMhz - 5950) / 5).toString()
+        else -> "--"
     }
 
     // --- RESTO DE TUS FUNCIONES ORIGINALES ---
@@ -819,97 +990,178 @@ class ItActivity : AppCompatActivity() {
     }
 
     private fun mostrarDialogoLogsEnPantalla() {
-        val contenedorLogs = ScrollView(this).apply {
-            setPadding(30, 30, 30, 30)
-            setBackgroundColor(Color.parseColor("#111111"))
+        val verde = Color.parseColor("#9CFF9F")
+        val verdeSuave = Color.parseColor("#B9F7C1")
+        val verdePanel = Color.parseColor("#07150A")
+        val amarillo = Color.parseColor("#FFE58A")
+        val rojo = Color.parseColor("#FF7B7B")
+
+        val dialog = Dialog(this)
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
+
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(18), dp(16), dp(18))
+            background = fondoRetro(Color.parseColor("#020704"), verde, 0, 1)
         }
-        val textoLogs = TextView(this).apply {
-            text = AppLog.obtenerLogs()
-            setTextColor(Color.GREEN)
-            textSize = 13f
-            typeface = Typeface.MONOSPACE
+
+        root.addView(textoRetro("// SYSTEM LOG", 23f, verde, true, Gravity.CENTER))
+        val ubicacion = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
+            .getString("ubicacion_dispositivo", "Terminal") ?: "Terminal"
+        root.addView(textoRetro("TERMINAL: $ubicacion  ·  TGT LOG-VIEW 64", 11f, Color.parseColor("#6FCB78"), false, Gravity.CENTER).apply {
+            setPadding(0, dp(3), 0, dp(12))
+        })
+
+        val tvResumen = textoRetro("Analizando registro...", 12f, amarillo, false, Gravity.CENTER).apply {
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            background = fondoRetro(Color.parseColor("#061008"), Color.parseColor("#2B7D39"), 9, 1)
         }
-        contenedorLogs.addView(textoLogs)
+        root.addView(tvResumen)
 
-        AlertDialog.Builder(this)
-            .setTitle("📋 Registro de Errores y Actividad (Logs)")
-            .setView(contenedorLogs)
-            .setPositiveButton("Cerrar", null)
-            .setNeutralButton("📋 Copiar") { _, _ ->
-                try {
-                    val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    val clip = ClipData.newPlainText("Logs Kiosco", AppLog.obtenerLogs())
-                    clipboard.setPrimaryClip(clip)
-                    Toast.makeText(this, "✅ ¡Logs copiados!", Toast.LENGTH_SHORT).show()
-                } catch (e: Exception) {
-                    Toast.makeText(this, "❌ Error al copiar: ${e.message}", Toast.LENGTH_SHORT).show()
+        val filaFiltros = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(0, dp(9), 0, dp(9))
+        }
+        val btnTodos = botonRetro("TODO", true)
+        val btnErrores = botonRetro("ERRORES", false)
+        val btnUltimos = botonRetro("ÚLTIMOS", false)
+        filaFiltros.addView(btnTodos, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginEnd = dp(4) })
+        filaFiltros.addView(btnErrores, LinearLayout.LayoutParams(0, dp(42), 1f).apply { setMargins(dp(4), 0, dp(4), 0) })
+        filaFiltros.addView(btnUltimos, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginStart = dp(4) })
+        root.addView(filaFiltros)
+
+        val scrollLogs = ScrollView(this).apply {
+            isFillViewport = true
+            background = fondoRetro(verdePanel, Color.parseColor("#2B7D39"), 10, 1)
+        }
+        val textoLogs = textoRetro("", 11.5f, verdeSuave, false, Gravity.START).apply {
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            setTextIsSelectable(true)
+            setLineSpacing(0f, 1.15f)
+        }
+        scrollLogs.addView(textoLogs)
+        root.addView(scrollLogs, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+
+        val filaAcciones = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(0, dp(10), 0, 0)
+        }
+        val btnCopiar = botonRetro("COPIAR", false)
+        val btnSms = botonRetro("SMS IT", false)
+        val btnCerrar = botonRetro("CERRAR", true)
+        filaAcciones.addView(btnCopiar, LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginEnd = dp(4) })
+        filaAcciones.addView(btnSms, LinearLayout.LayoutParams(0, dp(48), 1f).apply { setMargins(dp(4), 0, dp(4), 0) })
+        filaAcciones.addView(btnCerrar, LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginStart = dp(4) })
+        root.addView(filaAcciones)
+
+        root.addView(textoRetro("Creado por Marco Carpi\nMadecem.com", 10f, Color.parseColor("#6FCB78"), false, Gravity.CENTER).apply {
+            setPadding(0, dp(12), 0, 0)
+        })
+
+        var filtro = 0
+
+        fun actualizarLogs() {
+            val logs = AppLog.obtenerLogs()
+            val lineas = logs.replace("\r", "").split("\n").filter { it.isNotBlank() }
+            val errores = lineas.count {
+                val l = it.uppercase(Locale.getDefault())
+                l.contains("[ERROR]") || l.contains("ERROR") || l.contains("❌") || l.contains("FALLO")
+            }
+            val avisos = lineas.count {
+                val l = it.uppercase(Locale.getDefault())
+                l.contains("WARN") || l.contains("AVISO") || l.contains("⚠")
+            }
+
+            tvResumen.text = "EVENTOS ${lineas.size}   ·   ERRORES $errores   ·   AVISOS $avisos"
+            tvResumen.setTextColor(if (errores > 0) rojo else if (avisos > 0) amarillo else verde)
+
+            val salida = when (filtro) {
+                1 -> lineas.filter {
+                    val l = it.uppercase(Locale.getDefault())
+                    l.contains("[ERROR]") || l.contains("ERROR") || l.contains("❌") || l.contains("FALLO")
                 }
+                2 -> lineas.takeLast(120)
+                else -> lineas
             }
-            .setNegativeButton("📤 SMS") { _, _ ->
-                enviarLogsPorSms()
-            }
-            .setItems(arrayOf("📧 Enviar Logs por Email a IT")) { _, _ ->
-                enviarLogsPorEmail()
-            }
-            .show()
-    }
 
-    private fun enviarLogsPorEmail() {
-        try {
-            val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
-            val csvCache = prefs.getString("csv_cache_data", "") ?: ""
-            val correosSet = mutableSetOf<String>()
-
-            if (csvCache.isNotEmpty()) {
-                val lineas = csvCache.replace("\r", "").split("\n")
-                for (linea in lineas) {
-                    if (linea.isBlank()) continue
-                    val partes = if (linea.contains(";")) linea.split(";") else linea.split(",")
-                    if (partes.size >= 8) {
-                        val correo = partes[7].trim().replace("\"", "")
-                        if (correo.isNotEmpty() && correo.contains("@")) {
-                            correosSet.add(correo)
-                        }
-                    }
+            textoLogs.text = if (salida.isEmpty()) {
+                when (filtro) {
+                    1 -> "// SIN ERRORES REGISTRADOS"
+                    else -> "// REGISTRO VACÍO"
                 }
-            }
-
-            val correoITUnico = prefs.getString("correo_it", "") ?: ""
-            if (correoITUnico.isNotEmpty() && correoITUnico.contains("@")) {
-                correosSet.add(correoITUnico)
-            }
-
-            val arrayCorreos = correosSet.toTypedArray()
-            if (arrayCorreos.isEmpty()) {
-                Toast.makeText(this, "❌ No hay ningún correo IT configurado en la Columna 8 del Google Sheets", Toast.LENGTH_LONG).show()
-                return
-            }
-
-            val archivoLog = File(filesDir, "kiosco_log_persistente.txt")
-            val uriLog: Uri = if (archivoLog.exists()) {
-                FileProvider.getUriForFile(this, "${packageName}.fileprovider", archivoLog)
             } else {
-                Uri.EMPTY
+                salida.joinToString("\n")
             }
 
-            val intentEmail = Intent(Intent.ACTION_SEND).apply {
-                type = "text/plain"
-                putExtra(Intent.EXTRA_EMAIL, arrayCorreos)
-                putExtra(Intent.EXTRA_SUBJECT, "🚨 Reporte de Logs - Kiosco TGT (${prefs.getString("ubicacion_dispositivo", "Terminal")})")
-                putExtra(Intent.EXTRA_TEXT, "Adjunto encontrarás el archivo de registro de actividad y errores del terminal Kiosco.")
-                if (uriLog != Uri.EMPTY) {
-                    putExtra(Intent.EXTRA_STREAM, uriLog)
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                }
-            }
-
-            startActivity(Intent.createChooser(intentEmail, "Enviar Logs por Email a IT..."))
-            AppLog.registrar("📧 Diálogo de envío de logs por email abierto para: ${arrayCorreos.joinToString(", ")}")
-
-        } catch (e: Exception) {
-            AppLog.error("Error al preparar email de logs: ${e.message}")
-            Toast.makeText(this, "❌ Error al abrir cliente de correo: ${e.message}", Toast.LENGTH_LONG).show()
+            scrollLogs.post { scrollLogs.fullScroll(View.FOCUS_DOWN) }
         }
+
+        fun marcarFiltro(seleccionado: Button, vararg resto: Button) {
+            seleccionado.background = fondoRetro(verde, Color.parseColor("#58E76C"), 9, 1)
+            seleccionado.setTextColor(Color.parseColor("#021006"))
+            resto.forEach {
+                it.background = fondoRetro(Color.parseColor("#07150A"), Color.parseColor("#58E76C"), 9, 1)
+                it.setTextColor(verde)
+            }
+        }
+
+        btnTodos.setOnClickListener {
+            filtro = 0
+            marcarFiltro(btnTodos, btnErrores, btnUltimos)
+            actualizarLogs()
+        }
+        btnErrores.setOnClickListener {
+            filtro = 1
+            marcarFiltro(btnErrores, btnTodos, btnUltimos)
+            actualizarLogs()
+        }
+        btnUltimos.setOnClickListener {
+            filtro = 2
+            marcarFiltro(btnUltimos, btnTodos, btnErrores)
+            actualizarLogs()
+        }
+        btnCopiar.setOnClickListener {
+            try {
+                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("Logs Kiosco TGT", AppLog.obtenerLogs()))
+                Toast.makeText(this, "Logs copiados al portapapeles", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Toast.makeText(this, "Error al copiar: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+        }
+        btnSms.setOnClickListener { enviarLogsPorSms() }
+        btnCerrar.setOnClickListener { dialog.dismiss() }
+
+        dialog.setContentView(root)
+        dialog.window?.apply {
+            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            addFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            attributes = attributes.apply { dimAmount = 0.86f }
+        }
+        dialog.show()
+        dialog.window?.let { ventana ->
+            ventana.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT)
+            WindowCompat.setDecorFitsSystemWindows(ventana, false)
+            val baseLeft = root.paddingLeft
+            val baseTop = root.paddingTop
+            val baseRight = root.paddingRight
+            val baseBottom = root.paddingBottom
+            ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+                val barras = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+                view.setPadding(
+                    baseLeft + barras.left,
+                    baseTop + barras.top,
+                    baseRight + barras.right,
+                    baseBottom + barras.bottom
+                )
+                insets
+            }
+            ViewCompat.requestApplyInsets(root)
+        }
+        marcarFiltro(btnTodos, btnErrores, btnUltimos)
+        actualizarLogs()
     }
 
     private fun enviarLogsPorSms() {
