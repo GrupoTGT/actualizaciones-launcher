@@ -30,7 +30,6 @@ import android.view.Gravity
 import android.view.View
 import android.view.Window
 import android.view.WindowManager
-import android.widget.ArrayAdapter
 import android.widget.AutoCompleteTextView
 import android.widget.Button
 import android.widget.LinearLayout
@@ -973,6 +972,7 @@ class ItActivity : AppCompatActivity() {
 
     private fun cargarSeccionesEnDesplegable(autoCompleteTextView: AutoCompleteTextView?, prefs: android.content.SharedPreferences) {
         try {
+            val selector = autoCompleteTextView ?: return
             val csvCache = prefs.getString("csv_cache_data", "") ?: ""
             if (csvCache.isNotEmpty()) {
                 val lineas = csvCache.replace("\r", "").split("\n")
@@ -990,15 +990,26 @@ class ItActivity : AppCompatActivity() {
                 }
 
                 val listaSecciones = seccionesSet.toList()
-                val adapter = ArrayAdapter(this, android.R.layout.simple_dropdown_item_1line, listaSecciones)
-                autoCompleteTextView?.setAdapter(adapter)
-
-                autoCompleteTextView?.setOnClickListener {
-                    autoCompleteTextView.showDropDown()
+                val adapter = RetroGroupAdapter(this, listaSecciones) {
+                    selector.text?.toString().orEmpty()
                 }
-                autoCompleteTextView?.setOnFocusChangeListener { _, hasFocus ->
+                selector.setAdapter(adapter)
+                selector.threshold = 0
+                selector.setDropDownBackgroundDrawable(
+                    ContextCompat.getDrawable(this, R.drawable.bg_it_dropdown_popup)
+                )
+                selector.dropDownHeight = dp(48 * 6)
+                selector.dropDownVerticalOffset = dp(4)
+                selector.setOnItemClickListener { _, _, _, _ ->
+                    adapter.notifyDataSetChanged()
+                }
+
+                selector.setOnClickListener {
+                    selector.showDropDown()
+                }
+                selector.setOnFocusChangeListener { _, hasFocus ->
                     if (hasFocus) {
-                        autoCompleteTextView.showDropDown()
+                        selector.showDropDown()
                     }
                 }
             }

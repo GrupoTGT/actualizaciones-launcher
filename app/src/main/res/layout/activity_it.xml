@@ -47,6 +47,8 @@
             android:background="@drawable/bg_it_status"
             android:gravity="center"
             android:fontFamily="monospace"
+            app:drawableStartCompat="@drawable/ic_it_security"
+            android:drawablePadding="6dp"
             android:padding="8dp"
             android:text="● COMPROBANDO ESTADO..."
             android:textColor="#A4FFAF"
@@ -65,7 +67,7 @@
 
             <LinearLayout
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
+                android:layout_height="match_parent"
                 android:layout_weight="1"
                 android:orientation="vertical"
                 android:background="@drawable/bg_it_card"
@@ -74,7 +76,11 @@
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    app:drawableStartCompat="@drawable/ic_it_health"
+                    android:drawablePadding="7dp"
                     android:fontFamily="monospace"
+                    android:gravity="center_vertical"
+                    android:minHeight="24dp"
                     android:text="SALUD DEL TERMINAL"
                     android:textColor="#70FF83"
                     android:textSize="13sp"
@@ -143,7 +149,7 @@
 
             <LinearLayout
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
+                android:layout_height="match_parent"
                 android:layout_weight="1"
                 android:orientation="vertical"
                 android:background="@drawable/bg_it_card"
@@ -152,7 +158,11 @@
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
+                    app:drawableStartCompat="@drawable/ic_it_central"
+                    android:drawablePadding="7dp"
                     android:fontFamily="monospace"
+                    android:gravity="center_vertical"
+                    android:minHeight="24dp"
                     android:text="GESTION CENTRAL"
                     android:textColor="#70FF83"
                     android:textSize="13sp"
@@ -232,7 +242,7 @@
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnTestSincro"
                     android:layout_width="match_parent"
-                    android:layout_height="44dp"
+                    android:layout_height="48dp"
                     android:fontFamily="monospace"
                     android:text="SINCRONIZAR"
                     android:textColor="#A7FFB1"
@@ -257,12 +267,26 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                app:drawableStartCompat="@drawable/ic_it_identifier"
+                android:drawablePadding="7dp"
                 android:fontFamily="monospace"
+                android:gravity="center_vertical"
+                android:minHeight="24dp"
                 android:text="IDENTIFICADOR DE TERMINAL"
                 android:textColor="#70FF83"
-                android:textSize="12sp"
+                android:textSize="13sp"
                 android:textStyle="bold"
                 android:layout_marginBottom="7dp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:text="GRUPO // SELECCIÓN"
+                android:textColor="#6EB97A"
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="4dp" />
 
             <AutoCompleteTextView
                 android:id="@+id/etUbicacion"
@@ -271,10 +295,13 @@
                 android:background="@drawable/bg_it_input"
                 android:clickable="true"
                 android:cursorVisible="false"
+                android:drawableEnd="@drawable/ic_it_dropdown_arrow"
+                android:drawablePadding="8dp"
                 android:focusable="false"
                 android:focusableInTouchMode="false"
                 android:fontFamily="monospace"
                 android:hint="Selecciona seccion..."
+                android:inputType="none"
                 android:textColor="#B9F7C1"
                 android:textColorHint="#56845D"
                 android:textSize="12sp"
@@ -283,7 +310,7 @@
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnGuardarConfig"
                 android:layout_width="match_parent"
-                android:layout_height="44dp"
+                android:layout_height="48dp"
                 android:fontFamily="monospace"
                 android:text="GUARDAR IDENTIFICADOR"
                 android:textColor="#A7FFB1"
@@ -306,10 +333,14 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                app:drawableStartCompat="@drawable/ic_it_ota"
+                android:drawablePadding="7dp"
                 android:fontFamily="monospace"
+                android:gravity="center_vertical"
+                android:minHeight="24dp"
                 android:text="ACTUALIZACIONES OTA"
                 android:textColor="#70FF83"
-                android:textSize="14sp"
+                android:textSize="13sp"
                 android:textStyle="bold"
                 android:layout_marginBottom="8dp" />
 
@@ -337,7 +368,7 @@
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnForzarOTA"
                 android:layout_width="match_parent"
-                android:layout_height="46dp"
+                android:layout_height="48dp"
                 android:fontFamily="monospace"
                 android:text="BUSCAR ACTUALIZACION OTA"
                 android:textColor="#B7FFBF"
@@ -360,10 +391,14 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                app:drawableStartCompat="@drawable/ic_it_maintenance"
+                android:drawablePadding="7dp"
                 android:fontFamily="monospace"
+                android:gravity="center_vertical"
+                android:minHeight="24dp"
                 android:text="MODO MANTENIMIENTO"
                 android:textColor="#70FF83"
-                android:textSize="14sp"
+                android:textSize="13sp"
                 android:textStyle="bold"
                 android:layout_marginBottom="6dp" />
 
@@ -432,10 +467,14 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                app:drawableStartCompat="@drawable/ic_it_diagnostic"
+                android:drawablePadding="7dp"
                 android:fontFamily="monospace"
+                android:gravity="center_vertical"
+                android:minHeight="24dp"
                 android:text="DIAGNOSTICO"
                 android:textColor="#70FF83"
-                android:textSize="14sp"
+                android:textSize="13sp"
                 android:textStyle="bold"
                 android:layout_marginBottom="8dp" />
 
@@ -488,7 +527,7 @@
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnVerLogsIt"
                     android:layout_width="0dp"
-                    android:layout_height="46dp"
+                    android:layout_height="48dp"
                     android:layout_weight="1"
                     android:layout_marginEnd="4dp"
                     android:fontFamily="monospace"
@@ -497,6 +536,11 @@
                     android:textSize="10sp"
                     android:textStyle="bold"
                     android:backgroundTint="#07170B"
+                    app:icon="@drawable/ic_it_diagnostic"
+                    app:iconGravity="textStart"
+                    app:iconPadding="6dp"
+                    app:iconSize="18dp"
+                    app:iconTint="#A7FFB1"
                     app:cornerRadius="7dp"
                     app:strokeColor="#4FE265"
                     app:strokeWidth="1dp" />
@@ -504,7 +548,7 @@
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnWifiDiag"
                     android:layout_width="0dp"
-                    android:layout_height="46dp"
+                    android:layout_height="48dp"
                     android:layout_weight="1"
                     android:layout_marginStart="4dp"
                     android:layout_marginEnd="4dp"
@@ -514,6 +558,11 @@
                     android:textSize="10sp"
                     android:textStyle="bold"
                     android:backgroundTint="#07170B"
+                    app:icon="@drawable/ic_it_wifi"
+                    app:iconGravity="textStart"
+                    app:iconPadding="6dp"
+                    app:iconSize="18dp"
+                    app:iconTint="#A7FFB1"
                     app:cornerRadius="7dp"
                     app:strokeColor="#4FE265"
                     app:strokeWidth="1dp" />
@@ -521,7 +570,7 @@
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnPurgarApks"
                     android:layout_width="0dp"
-                    android:layout_height="46dp"
+                    android:layout_height="48dp"
                     android:layout_weight="1"
                     android:layout_marginStart="4dp"
                     android:fontFamily="monospace"
@@ -530,6 +579,11 @@
                     android:textSize="10sp"
                     android:textStyle="bold"
                     android:backgroundTint="#211B08"
+                    app:icon="@drawable/ic_it_apps"
+                    app:iconGravity="textStart"
+                    app:iconPadding="5dp"
+                    app:iconSize="18dp"
+                    app:iconTint="#FFE59A"
                     app:cornerRadius="7dp"
                     app:strokeColor="#D7B94B"
                     app:strokeWidth="1dp" />
