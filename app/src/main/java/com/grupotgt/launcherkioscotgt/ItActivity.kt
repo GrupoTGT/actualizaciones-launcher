@@ -33,7 +33,6 @@ import android.view.WindowManager
 import android.widget.ArrayAdapter
 import android.widget.AutoCompleteTextView
 import android.widget.Button
-import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
@@ -652,18 +651,21 @@ class ItActivity : AppCompatActivity() {
             background = fondoRetro(Color.parseColor("#020704"), verde, 0, 1)
         }
 
-        root.addView(ImageView(this).apply {
-            setImageResource(R.drawable.ic_retro_network_antenna)
+        val antennaView = RetroNetworkAntennaView(this).apply {
             contentDescription = getString(R.string.retro_antenna_content_description)
-            scaleType = ImageView.ScaleType.CENTER_INSIDE
-        }, LinearLayout.LayoutParams(dp(72), dp(52)).apply {
+        }
+        root.addView(antennaView, LinearLayout.LayoutParams(dp(72), dp(52)).apply {
             gravity = Gravity.CENTER_HORIZONTAL
             bottomMargin = dp(4)
         })
         root.addView(textoRetro("// ANALIZADOR DE RED", 23f, verde, true, Gravity.CENTER))
         root.addView(textoRetro("TGT NET-SCAN 64  ·  DIAGNÓSTICO EN TIEMPO REAL", 11f, Color.parseColor("#6FCB78"), false, Gravity.CENTER).apply {
-            setPadding(0, dp(3), 0, dp(14))
+            setPadding(0, dp(3), 0, dp(4))
         })
+        val tvMonitorizacion = textoRetro("○ MONITORIZACIÓN EN ESPERA", 10f, amarillo, true, Gravity.CENTER).apply {
+            setPadding(0, 0, 0, dp(12))
+        }
+        root.addView(tvMonitorizacion)
 
         val cardEstado = tarjetaRetro(verdePanel, verde)
         val tvEstado = textoRetro("ESCANEANDO RED...", 16f, amarillo, true, Gravity.CENTER)
@@ -758,6 +760,7 @@ class ItActivity : AppCompatActivity() {
                     val rssi = wifiInfo?.rssi ?: -100
                     val ssidRaw = wifiInfo?.ssid?.replace("\"", "") ?: "--"
                     val ssid = if (ssidRaw == "<unknown ssid>") "SIN IDENTIFICAR" else ssidRaw
+                    val enlaceWifiActivo = ssid != "--" && ssid != "SIN IDENTIFICAR"
                     val linkSpeed = wifiInfo?.linkSpeed ?: 0
                     val frecuencia = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) wifiInfo?.frequency ?: 0 else 0
                     val quality = WifiManager.calculateSignalLevel(rssi, 100).coerceIn(0, 100)
@@ -800,6 +803,9 @@ class ItActivity : AppCompatActivity() {
                     tvCalidad.setTextColor(estado.second)
                     tvEstado.text = if (ssid == "--" || ssid == "SIN IDENTIFICAR") "SIN RED WIFI IDENTIFICADA" else "ENLACE WIFI ACTIVO"
                     tvEstado.setTextColor(if (ssid == "--" || ssid == "SIN IDENTIFICAR") amarillo else verde)
+                    antennaView.setSignalActive(enlaceWifiActivo)
+                    tvMonitorizacion.text = if (enlaceWifiActivo) "● MONITORIZACIÓN ACTIVA" else "○ SIN ENLACE WIFI"
+                    tvMonitorizacion.setTextColor(if (enlaceWifiActivo) verde else amarillo)
                     tvDatos.text =
                         "SSID          $ssid\n" +
                                 "IP            $ipLocal\n" +
@@ -807,6 +813,9 @@ class ItActivity : AppCompatActivity() {
                                 "CANAL         $canal\n" +
                                 "ENLACE        ${linkSpeed} Mbps"
                 } catch (e: Exception) {
+                    antennaView.setSignalActive(false)
+                    tvMonitorizacion.text = "○ MONITORIZACIÓN EN ESPERA"
+                    tvMonitorizacion.setTextColor(amarillo)
                     tvEstado.text = "ERROR DE TELEMETRÍA WIFI"
                     tvEstado.setTextColor(rojo)
                     tvDatos.text = "No se pudo leer el hardware Wi-Fi.\n${e.message ?: "Sin detalle"}"
