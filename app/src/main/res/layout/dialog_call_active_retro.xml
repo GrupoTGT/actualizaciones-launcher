@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/callRetroRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000"
+    android:paddingLeft="20dp"
+    android:paddingTop="24dp"
+    android:paddingRight="20dp"
+    android:paddingBottom="24dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:background="@drawable/bg_call_terminal_frame"
+        android:gravity="center_horizontal"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:letterSpacing="0.12"
+            android:text="@string/call_terminal_header"
+            android:textColor="#6FCB78"
+            android:textSize="11sp" />
+
+        <ImageView
+            android:layout_width="70dp"
+            android:layout_height="70dp"
+            android:layout_marginTop="22dp"
+            android:contentDescription="@string/call_active_icon_description"
+            android:padding="10dp"
+            android:src="@drawable/ic_main_phone" />
+
+        <TextView
+            android:id="@+id/tvCallActiveState"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:fontFamily="monospace"
+            android:gravity="center"
+            android:letterSpacing="0.1"
+            android:textColor="#9CFF9F"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tvCallActiveSignal"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="5dp"
+            android:fontFamily="monospace"
+            android:letterSpacing="0.2"
+            android:text="@string/call_signal_bars"
+            android:textColor="#6FCB78"
+            android:textSize="15sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="22dp"
+            android:background="@drawable/bg_call_identity_panel"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:paddingLeft="16dp"
+            android:paddingTop="22dp"
+            android:paddingRight="16dp"
+            android:paddingBottom="22dp">
+
+            <TextView
+                android:id="@+id/tvCallActiveName"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:fontFamily="monospace"
+                android:gravity="center"
+                android:maxLines="2"
+                android:textColor="#E0FFE4"
+                android:textSize="30sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvCallActiveNumber"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:ellipsize="end"
+                android:fontFamily="monospace"
+                android:gravity="center"
+                android:maxLines="1"
+                android:textColor="#B9F7C1"
+                android:textSize="18sp" />
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/btnCallEnd"
+            android:layout_width="match_parent"
+            android:layout_height="58dp"
+            android:layout_marginTop="24dp"
+            android:background="@drawable/bg_call_button_end"
+            android:backgroundTint="@null"
+            android:fontFamily="monospace"
+            android:text="@string/call_end"
+            android:textColor="#FF9A9A"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:fontFamily="monospace"
+            android:text="@string/call_secure_channel"
+            android:textColor="#2B7D39"
+            android:textSize="11sp" />
+    </LinearLayout>
+</FrameLayout>

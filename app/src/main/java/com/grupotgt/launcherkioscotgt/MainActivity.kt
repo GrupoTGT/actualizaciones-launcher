@@ -47,7 +47,6 @@ import android.view.View
 import android.view.WindowManager
 import android.view.animation.Animation
 import android.view.animation.AccelerateDecelerateInterpolator
-import android.view.animation.ScaleAnimation
 import android.widget.*
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
@@ -2521,8 +2520,49 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun configurarVentanaLlamadaRetro(dialog: Dialog, root: View, descartarKeyguard: Boolean) {
+        dialog.window?.let { win ->
+            WindowCompat.setDecorFitsSystemWindows(win, false)
+            win.statusBarColor = Color.BLACK
+            win.navigationBarColor = Color.BLACK
+            win.decorView.systemUiVisibility = (
+                    View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+                            View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                            View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+                            View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                            View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                            View.SYSTEM_UI_FLAG_FULLSCREEN
+                    )
+
+            @Suppress("DEPRECATION")
+            var flags = WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+            if (descartarKeyguard) flags = flags or WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
+            win.addFlags(flags)
+        }
+
+        val left = root.paddingLeft
+        val top = root.paddingTop
+        val right = root.paddingRight
+        val bottom = root.paddingBottom
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            val safe = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+            )
+            view.setPadding(
+                left + safe.left,
+                top + safe.top,
+                right + safe.right,
+                bottom + safe.bottom
+            )
+            insets
+        }
+        ViewCompat.requestApplyInsets(root)
+    }
+
     private fun mostrarPantallaLlamadaEntrante(nombreCaller: String, numeroCaller: String) {
-        if (dialogLlamadaEntrante != null && dialogLlamadaEntrante!!.isShowing) return
+        if (dialogLlamadaEntrante?.isShowing == true) return
 
         try {
             if (wakeLockLlamada?.isHeld == true) wakeLockLlamada?.release()
@@ -2540,169 +2580,36 @@ class MainActivity : AppCompatActivity() {
             startActivity(intentBring)
             Handler(Looper.getMainLooper()).postDelayed({ startActivity(intentBring) }, 800)
             Handler(Looper.getMainLooper()).postDelayed({ startActivity(intentBring) }, 2000)
-
         } catch (e: Exception) {
             AppLog.error("Error forzando WakeLock: ${e.message}")
         }
 
         runOnUiThread {
             try {
-                dialogLlamadaEntrante = Dialog(this@MainActivity, android.R.style.Theme_Black_NoTitleBar_Fullscreen).apply {
-                    window?.let { win ->
-                        win.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                                or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                                or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                                or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                                or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                                or View.SYSTEM_UI_FLAG_FULLSCREEN)
+                val content = layoutInflater.inflate(R.layout.dialog_call_incoming_retro, null)
+                content.findViewById<TextView>(R.id.tvCallIncomingName).text = nombreCaller
+                content.findViewById<TextView>(R.id.tvCallIncomingNumber).text = numeroCaller
 
-                        @Suppress("DEPRECATION")
-                        win.addFlags(
-                            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
-                                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
-                                    WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
-                                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
-                        )
-                    }
-
-                    val rootLayout = LinearLayout(context).apply {
-                        orientation = LinearLayout.VERTICAL
-                        gravity = Gravity.CENTER
-                        background = GradientDrawable(
-                            GradientDrawable.Orientation.TOP_BOTTOM,
-                            intArrayOf(Color.parseColor("#0F172A"), Color.parseColor("#020617"))
-                        )
-                    }
-
-                    val cardLayout = LinearLayout(context).apply {
-                        orientation = LinearLayout.VERTICAL
-                        gravity = Gravity.CENTER
-                        background = GradientDrawable().apply {
-                            setColor(Color.parseColor("#1E293B"))
-                            cornerRadius = 50f
-                            setStroke(2, Color.parseColor("#334155"))
-                        }
-                        setPadding(40, 80, 40, 80)
-
-                        layoutParams = LinearLayout.LayoutParams(
-                            (resources.displayMetrics.widthPixels * 0.90).toInt(),
-                            LinearLayout.LayoutParams.WRAP_CONTENT
-                        )
-                        elevation = 30f
-                    }
-
-                    val iconoPersona = TextView(context).apply {
-                        text = "👤"
-                        textSize = 80f
-                        gravity = Gravity.CENTER
-                        layoutParams = LinearLayout.LayoutParams(-2, -2).apply { setMargins(0, 0, 0, 30) }
-
-                        val pulseAnim = ScaleAnimation(
-                            0.95f, 1.05f, 0.95f, 1.05f,
-                            Animation.RELATIVE_TO_SELF, 0.5f,
-                            Animation.RELATIVE_TO_SELF, 0.5f
-                        ).apply {
-                            duration = 800
-                            repeatMode = Animation.REVERSE
-                            repeatCount = Animation.INFINITE
-                        }
-                        startAnimation(pulseAnim)
-                    }
-
-                    val tituloLlamada = TextView(context).apply {
-                        text = "LLAMADA ENTRANTE"
-                        setTextColor(Color.parseColor("#00E5FF"))
-                        textSize = 16f
-                        gravity = Gravity.CENTER
-                        setTypeface(null, Typeface.BOLD)
-                        letterSpacing = 0.1f
-                    }
-
-                    val textoNombre = TextView(context).apply {
-                        text = nombreCaller
-                        setTextColor(Color.WHITE)
-                        textSize = 42f
-                        gravity = Gravity.CENTER
-                        setTypeface(null, Typeface.BOLD)
-                        layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 20, 0, 5) }
-                    }
-
-                    val textoNumero = TextView(context).apply {
-                        text = numeroCaller
-                        setTextColor(Color.parseColor("#94A3B8"))
-                        textSize = 22f
-                        gravity = Gravity.CENTER
-                        layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, 80) }
-                    }
-
-                    val buttonLayout = LinearLayout(context).apply {
-                        orientation = LinearLayout.HORIZONTAL
-                        gravity = Gravity.CENTER
-                        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-                    }
-
-                    val btnRechazar = Button(context).apply {
-                        text = "  COLGAR"
-                        background = GradientDrawable().apply {
-                            setColor(Color.parseColor("#E11D48"))
-                            cornerRadius = 100f
-                        }
-                        setTextColor(Color.WHITE)
-                        textSize = 20f
-                        setTypeface(null, Typeface.BOLD)
-                        setPadding(0, 40, 0, 40)
-
-                        val p = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                            setMargins(20, 0, 20, 0)
-                        }
-                        layoutParams = p
-                    }
-
-                    val btnContestar = Button(context).apply {
-                        text = "  CONTESTAR"
-                        background = GradientDrawable().apply {
-                            setColor(Color.parseColor("#10B981"))
-                            cornerRadius = 100f
-                        }
-                        setTextColor(Color.WHITE)
-                        textSize = 20f
-                        setTypeface(null, Typeface.BOLD)
-                        setPadding(0, 40, 0, 40)
-
-                        val p = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
-                            setMargins(20, 0, 20, 0)
-                        }
-                        layoutParams = p
-                    }
-
-                    btnContestar.setOnClickListener {
-                        AppLog.success("Llamada contestada desde UI Pro")
+                dialogLlamadaEntrante = Dialog(
+                    this@MainActivity,
+                    android.R.style.Theme_Black_NoTitleBar_Fullscreen
+                ).apply {
+                    content.findViewById<Button>(R.id.btnCallAnswer).setOnClickListener {
+                        AppLog.success("Llamada contestada desde UI retro")
                         contestarLlamadaReal()
                         dismiss()
                         mostrarPantallaLlamando(nombreCaller, numeroCaller, false)
                     }
-
-                    btnRechazar.setOnClickListener {
-                        AppLog.warning("Llamada colgada desde UI Pro")
+                    content.findViewById<Button>(R.id.btnCallReject).setOnClickListener {
+                        AppLog.warning("Llamada rechazada desde UI retro")
                         colgarLlamadaReal()
                         dismiss()
                         liberarPantalla()
                     }
 
-                    buttonLayout.addView(btnRechazar)
-                    buttonLayout.addView(btnContestar)
-
-                    cardLayout.addView(iconoPersona)
-                    cardLayout.addView(tituloLlamada)
-                    cardLayout.addView(textoNombre)
-                    cardLayout.addView(textoNumero)
-                    cardLayout.addView(buttonLayout)
-
-                    rootLayout.addView(cardLayout)
-
-                    setContentView(rootLayout)
+                    setContentView(content)
                     setCancelable(false)
+                    configurarVentanaLlamadaRetro(this, content, descartarKeyguard = true)
                     show()
                 }
             } catch (e: Exception) {
@@ -2712,109 +2619,31 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun mostrarPantallaLlamando(nombre: String, numero: String, esSaliente: Boolean = true) {
-        if (dialogLlamadaActiva != null && dialogLlamadaActiva!!.isShowing) return
+        if (dialogLlamadaActiva?.isShowing == true) return
 
         runOnUiThread {
             try {
-                dialogLlamadaActiva = Dialog(this@MainActivity, android.R.style.Theme_Black_NoTitleBar_Fullscreen).apply {
-                    window?.let { win ->
-                        win.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                                or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                                or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                                or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                                or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                                or View.SYSTEM_UI_FLAG_FULLSCREEN)
+                val content = layoutInflater.inflate(R.layout.dialog_call_active_retro, null)
+                content.findViewById<TextView>(R.id.tvCallActiveState).setText(
+                    if (esSaliente) R.string.call_state_dialing else R.string.call_state_connected
+                )
+                content.findViewById<TextView>(R.id.tvCallActiveName).text = nombre
+                content.findViewById<TextView>(R.id.tvCallActiveNumber).text = numero
 
-                        @Suppress("DEPRECATION")
-                        win.addFlags(
-                            WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
-                                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
-                                    WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
-                                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
-                        )
-                    }
-
-                    val rootLayout = LinearLayout(context).apply {
-                        orientation = LinearLayout.VERTICAL
-                        gravity = Gravity.CENTER
-                        background = GradientDrawable(
-                            GradientDrawable.Orientation.TOP_BOTTOM,
-                            intArrayOf(Color.parseColor("#0F172A"), Color.parseColor("#020617"))
-                        )
-                    }
-
-                    val cardLayout = LinearLayout(context).apply {
-                        orientation = LinearLayout.VERTICAL
-                        gravity = Gravity.CENTER
-                        background = GradientDrawable().apply {
-                            setColor(Color.parseColor("#1E293B"))
-                            cornerRadius = 50f
-                            setStroke(2, Color.parseColor("#10B981"))
-                        }
-                        setPadding(40, 80, 40, 80)
-
-                        layoutParams = LinearLayout.LayoutParams(
-                            (resources.displayMetrics.widthPixels * 0.85).toInt(),
-                            LinearLayout.LayoutParams.WRAP_CONTENT
-                        )
-                        elevation = 30f
-                    }
-
-                    val tituloEstado = TextView(context).apply {
-                        text = "EN LLAMADA"
-                        setTextColor(Color.parseColor("#10B981"))
-                        textSize = 16f
-                        gravity = Gravity.CENTER
-                        setTypeface(null, Typeface.BOLD)
-                        letterSpacing = 0.1f
-                    }
-
-                    val textoNombre = TextView(context).apply {
-                        text = nombre
-                        setTextColor(Color.WHITE)
-                        textSize = 38f
-                        gravity = Gravity.CENTER
-                        setTypeface(null, Typeface.BOLD)
-                        layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 20, 0, 5) }
-                    }
-
-                    val textoNumero = TextView(context).apply {
-                        text = numero
-                        setTextColor(Color.parseColor("#94A3B8"))
-                        textSize = 20f
-                        gravity = Gravity.CENTER
-                        layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(0, 0, 0, 80) }
-                    }
-
-                    val btnColgar = Button(context).apply {
-                        text = "FINALIZAR LLAMADA"
-                        background = GradientDrawable().apply {
-                            setColor(Color.parseColor("#E11D48"))
-                            cornerRadius = 100f
-                        }
-                        setTextColor(Color.WHITE)
-                        textSize = 22f
-                        setTypeface(null, Typeface.BOLD)
-                        setPadding(0, 45, 0, 45)
-                        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-                    }
-
-                    btnColgar.setOnClickListener {
-                        AppLog.info("Colgado manual desde UI Activa Pro")
+                dialogLlamadaActiva = Dialog(
+                    this@MainActivity,
+                    android.R.style.Theme_Black_NoTitleBar_Fullscreen
+                ).apply {
+                    content.findViewById<Button>(R.id.btnCallEnd).setOnClickListener {
+                        AppLog.info("Llamada finalizada desde UI retro")
                         colgarLlamadaReal()
                         dismiss()
                         liberarPantalla()
                     }
 
-                    cardLayout.addView(tituloEstado)
-                    cardLayout.addView(textoNombre)
-                    cardLayout.addView(textoNumero)
-                    cardLayout.addView(btnColgar)
-
-                    rootLayout.addView(cardLayout)
-
-                    setContentView(rootLayout)
+                    setContentView(content)
                     setCancelable(false)
+                    configurarVentanaLlamadaRetro(this, content, descartarKeyguard = false)
                     show()
                 }
 
@@ -2835,7 +2664,6 @@ class MainActivity : AppCompatActivity() {
                         }
                     }, 300)
                 }
-
             } catch (e: Exception) {
                 AppLog.error("Error al mostrar UI Activa: ${e.message}")
             }

@@ -40,4 +40,16 @@
     <string name="screensaver_connection_operational">CONEXIÓN · OPERATIVA</string>
     <string name="screensaver_connection_offline">CONEXIÓN · SIN INTERNET</string>
     <string name="screensaver_tap_to_continue">TOCA PARA CONTINUAR</string>
+    <string name="call_terminal_header">TGT // TERMINAL DE COMUNICACIONES</string>
+    <string name="call_incoming_title">LLAMADA ENTRANTE</string>
+    <string name="call_incoming_subtitle">SEÑAL DE VOZ DETECTADA</string>
+    <string name="call_state_dialing">CONECTANDO LLAMADA</string>
+    <string name="call_state_connected">CONEXIÓN ESTABLECIDA</string>
+    <string name="call_signal_bars">|  ||  |||  ||  |</string>
+    <string name="call_reject">RECHAZAR</string>
+    <string name="call_answer">CONTESTAR</string>
+    <string name="call_end">FINALIZAR LLAMADA</string>
+    <string name="call_secure_channel">CANAL DE VOZ // CONTROL LOCAL</string>
+    <string name="call_incoming_icon_description">Llamada entrante</string>
+    <string name="call_active_icon_description">Llamada en curso</string>
 </resources>
