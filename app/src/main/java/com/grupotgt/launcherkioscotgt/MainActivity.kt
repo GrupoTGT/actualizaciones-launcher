@@ -11,6 +11,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.res.ColorStateList
 import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
 import android.graphics.Color
@@ -38,12 +39,14 @@ import android.telecom.TelecomManager
 import android.telephony.SmsManager
 import android.telephony.TelephonyManager
 import android.text.InputType
+import android.text.method.PasswordTransformationMethod
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.view.animation.Animation
+import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.ScaleAnimation
 import android.widget.*
 import androidx.activity.OnBackPressedCallback
@@ -51,6 +54,10 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.widget.TextViewCompat
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.OkHttpClient
@@ -957,6 +964,39 @@ class MainActivity : AppCompatActivity() {
     private var handlerInactividad = Handler(Looper.getMainLooper())
     private var minutosInactividadConfig = 10
     private var dialogScreensaver: Dialog? = null
+    private val handlerMovimientoScreensaver = Handler(Looper.getMainLooper())
+    private var contenidoScreensaver: View? = null
+    private var indiceMovimientoScreensaver = 0
+    private var ultimoEstadoConexionTexto = "CONEXIÓN · --"
+    private var ultimoEstadoConexionColor = Color.parseColor("#FFE58A")
+
+    private val runnableMovimientoScreensaver = object : Runnable {
+        override fun run() {
+            val contenido = contenidoScreensaver ?: return
+            if (!animacionesSistemaActivas()) return
+
+            val posiciones = arrayOf(
+                -14 to -34,
+                16 to -18,
+                10 to 34,
+                -16 to 20,
+                0 to 0
+            )
+            val (xDp, yDp) = posiciones[indiceMovimientoScreensaver % posiciones.size]
+            indiceMovimientoScreensaver++
+            contenido.animate()
+                .translationX(dpMain(xDp).toFloat())
+                .translationY(dpMain(yDp).toFloat())
+                .setDuration(1600L)
+                .setInterpolator(AccelerateDecelerateInterpolator())
+                .withEndAction {
+                    if (contenidoScreensaver === contenido) {
+                        handlerMovimientoScreensaver.postDelayed(this, 30_000L)
+                    }
+                }
+                .start()
+        }
+    }
 
     // TextToSpeech Motor
     private lateinit var tts: TextToSpeech
@@ -1142,6 +1182,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             setContentView(R.layout.activity_main)
+            configurarVentanaPrincipalRetro()
 
             procesarIntentMantenimiento(intent)
 
@@ -1363,6 +1404,62 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun configurarVentanaPrincipalRetro() {
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.statusBarColor = Color.BLACK
+        window.navigationBarColor = Color.BLACK
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            isAppearanceLightStatusBars = false
+            isAppearanceLightNavigationBars = false
+        }
+
+        val root = findViewById<View>(R.id.mainRoot) ?: return
+        val paddingLeftBase = root.paddingLeft
+        val paddingRightBase = root.paddingRight
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            val zonaSegura = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+            )
+            view.setPadding(
+                paddingLeftBase + zonaSegura.left,
+                zonaSegura.top,
+                paddingRightBase + zonaSegura.right,
+                zonaSegura.bottom
+            )
+            insets
+        }
+        ViewCompat.requestApplyInsets(root)
+    }
+
+    private fun dpMain(value: Int): Int =
+        (value * resources.displayMetrics.density).toInt()
+
+    private fun animacionesSistemaActivas(): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            android.animation.ValueAnimator.areAnimatorsEnabled()
+        } else {
+            Settings.Global.getFloat(
+                contentResolver,
+                Settings.Global.ANIMATOR_DURATION_SCALE,
+                1f
+            ) != 0f
+        }
+
+    private fun iniciarMovimientoScreensaver(contenido: View) {
+        detenerMovimientoScreensaver()
+        contenidoScreensaver = contenido
+        indiceMovimientoScreensaver = 0
+        if (animacionesSistemaActivas()) {
+            handlerMovimientoScreensaver.postDelayed(runnableMovimientoScreensaver, 30_000L)
+        }
+    }
+
+    private fun detenerMovimientoScreensaver() {
+        handlerMovimientoScreensaver.removeCallbacks(runnableMovimientoScreensaver)
+        contenidoScreensaver?.animate()?.cancel()
+        contenidoScreensaver = null
+    }
+
     override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
         reiniciarTemporizadorInactividad()
         if (dialogScreensaver != null && dialogScreensaver!!.isShowing) {
@@ -1388,87 +1485,92 @@ class MainActivity : AppCompatActivity() {
                 val nombreSeccion = prefs.getString("ubicacion_dispositivo", "Sección No Asignada")?.uppercase(Locale.getDefault()) ?: "SECCIÓN NO ASIGNADA"
                 val logoUriString = prefs.getString("logo_uri_custom", "")
 
-                dialogScreensaver = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen).apply {
-                    window?.let { win ->
-                        win.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_STABLE or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or View.SYSTEM_UI_FLAG_FULLSCREEN)
-                        @Suppress("DEPRECATION")
-                        win.addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS)
+                val dialog = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+                val inflateParent = FrameLayout(this)
+                val root = layoutInflater.inflate(
+                    R.layout.dialog_screensaver_retro,
+                    inflateParent,
+                    false
+                )
+                val contenido = root.findViewById<View>(R.id.screensaverContent)
+                val logo = root.findViewById<ImageView>(R.id.screensaverLogo)
+                val antena = root.findViewById<RetroNetworkAntennaView>(R.id.screensaverAntenna)
+                val terminal = root.findViewById<TextView>(R.id.screensaverTerminal)
+                val conexion = root.findViewById<TextView>(R.id.screensaverConnection)
+
+                terminal.text = nombreSeccion
+                conexion.text = ultimoEstadoConexionTexto
+                conexion.setTextColor(ultimoEstadoConexionColor)
+                antena.setSignalActive(true)
+
+                if (!logoUriString.isNullOrEmpty()) {
+                    try {
+                        logo.setImageURI(Uri.parse(logoUriString))
+                    } catch (_: Exception) {
+                        logo.setImageResource(R.drawable.logo_corporativo)
                     }
-
-                    val rootLayout = LinearLayout(context).apply {
-                        orientation = LinearLayout.VERTICAL
-                        background = GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, intArrayOf(Color.parseColor("#020617"), Color.parseColor("#0F172A")))
-                    }
-
-                    val topLayout = LinearLayout(context).apply {
-                        orientation = LinearLayout.VERTICAL
-                        gravity = Gravity.CENTER or Gravity.TOP
-                        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
-                        setPadding(0, 120, 0, 0)
-                    }
-
-                    if (!logoUriString.isNullOrEmpty()) {
-                        try {
-                            val ivLogo = ImageView(context).apply {
-                                setImageURI(Uri.parse(logoUriString))
-                                layoutParams = LinearLayout.LayoutParams(600, 250).apply { setMargins(0, 0, 0, 30) }
-                                scaleType = ImageView.ScaleType.FIT_CENTER
-                            }
-                            topLayout.addView(ivLogo)
-                        } catch (e: Exception) {
-                            val tvMarcaFallback = TextView(context).apply {
-                                text = "GRUPO TGT"; setTextColor(Color.parseColor("#C8102E")); textSize = 38f; gravity = Gravity.CENTER; setTypeface(null, Typeface.BOLD); letterSpacing = 0.2f
-                                layoutParams = LinearLayout.LayoutParams(-2, -2).apply { setMargins(0, 0, 0, 20) }
-                            }
-                            topLayout.addView(tvMarcaFallback)
-                        }
-                    } else {
-                        val tvMarcaTGT = TextView(context).apply {
-                            text = "GRUPO TGT"; setTextColor(Color.parseColor("#C8102E")); textSize = 38f; gravity = Gravity.CENTER; setTypeface(null, Typeface.BOLD); letterSpacing = 0.2f
-                            layoutParams = LinearLayout.LayoutParams(-2, -2).apply { setMargins(0, 0, 0, 20) }
-                        }
-                        topLayout.addView(tvMarcaTGT)
-                    }
-
-                    val tvSeccion = TextView(context).apply {
-                        text = nombreSeccion; setTextColor(Color.parseColor("#F59E0B")); textSize = 28f; gravity = Gravity.CENTER; setTypeface(null, Typeface.BOLD); letterSpacing = 0.1f
-                    }
-                    topLayout.addView(tvSeccion)
-
-                    val centerLayout = LinearLayout(context).apply {
-                        orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-                    }
-
-                    val tvHoraGigante = TextClock(context).apply {
-                        format24Hour = "HH:mm"; format12Hour = "HH:mm"; setTextColor(Color.WHITE); textSize = 115f; gravity = Gravity.CENTER; setTypeface(null, Typeface.BOLD); setShadowLayer(30f, 0f, 0f, Color.parseColor("#00E5FF"))
-                    }
-                    centerLayout.addView(tvHoraGigante)
-
-                    val bottomLayout = LinearLayout(context).apply {
-                        orientation = LinearLayout.VERTICAL; gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL; layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f); setPadding(0, 0, 0, 50)
-                    }
-
-                    val tvAvisoToque = TextView(context).apply {
-                        text = "Toca la pantalla para volver"; setTextColor(Color.parseColor("#64748B")); textSize = 18f; gravity = Gravity.CENTER; layoutParams = LinearLayout.LayoutParams(-2, -2).apply { setMargins(0, 0, 0, 40) }
-                        val alphaAnim = android.view.animation.AlphaAnimation(0.4f, 1.0f).apply { duration = 1500; repeatMode = Animation.REVERSE; repeatCount = Animation.INFINITE }
-                        startAnimation(alphaAnim)
-                    }
-
-                    val tvFirma = TextView(context).apply { text = "Creado por Marco Carpi."; setTextColor(Color.parseColor("#1E293B")); textSize = 11f; gravity = Gravity.CENTER }
-
-                    bottomLayout.addView(tvAvisoToque)
-                    bottomLayout.addView(tvFirma)
-
-                    rootLayout.addView(topLayout)
-                    rootLayout.addView(centerLayout)
-                    rootLayout.addView(bottomLayout)
-
-                    rootLayout.setOnClickListener { dismiss(); reiniciarTemporizadorInactividad() }
-
-                    setContentView(rootLayout)
-                    setCancelable(false)
-                    show()
                 }
+
+                root.setOnClickListener {
+                    dialog.dismiss()
+                    reiniciarTemporizadorInactividad()
+                }
+
+                dialog.setContentView(root)
+                dialog.setCancelable(false)
+                dialog.setOnDismissListener {
+                    antena.setSignalActive(false)
+                    detenerMovimientoScreensaver()
+                    if (dialogScreensaver === dialog) dialogScreensaver = null
+                }
+
+                dialog.window?.let { win ->
+                    WindowCompat.setDecorFitsSystemWindows(win, false)
+                    win.decorView.systemUiVisibility = (
+                        View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+                            View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                            View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+                            View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+                            View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                            View.SYSTEM_UI_FLAG_FULLSCREEN
+                        )
+                    @Suppress("DEPRECATION")
+                    win.addFlags(
+                        WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                            WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON or
+                            WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
+                    )
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                        win.attributes = win.attributes.apply {
+                            layoutInDisplayCutoutMode =
+                                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_NEVER
+                        }
+                    }
+                }
+
+                ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+                    val zonaSegura = insets.getInsets(
+                        WindowInsetsCompat.Type.systemBars() or
+                            WindowInsetsCompat.Type.displayCutout()
+                    )
+                    view.setPadding(
+                        zonaSegura.left,
+                        zonaSegura.top,
+                        zonaSegura.right,
+                        zonaSegura.bottom
+                    )
+                    insets
+                }
+
+                dialogScreensaver = dialog
+                dialog.show()
+                dialog.window?.setLayout(
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.MATCH_PARENT
+                )
+                ViewCompat.requestApplyInsets(root)
+                iniciarMovimientoScreensaver(contenido)
             } catch (e: Exception) {}
         }
     }
@@ -2269,13 +2371,27 @@ class MainActivity : AppCompatActivity() {
                 val btn = Button(this).apply {
                     text = nombre
                     setTextColor(Color.WHITE)
-                    textSize = 16f
-                    typeface = Typeface.DEFAULT_BOLD
-                    backgroundTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#C8102E"))
-                    elevation = 8f
+                    textSize = 14f
+                    setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
+                    isAllCaps = false
+                    gravity = Gravity.CENTER
+                    maxLines = 2
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                    backgroundTintList = null
+                    background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_main_action_contact)
+                    elevation = 0f
+                    contentDescription = getString(R.string.main_contact_action_description, nombre)
+                    setPadding(dpMain(8), dpMain(8), dpMain(8), dpMain(8))
+                    ContextCompat.getDrawable(this@MainActivity, R.drawable.ic_main_phone)?.mutate()?.let { icono ->
+                        val lado = dpMain(22)
+                        icono.setBounds(0, 0, lado, lado)
+                        setCompoundDrawables(null, icono, null, null)
+                        compoundDrawablePadding = dpMain(5)
+                    }
 
                     val p = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply {
-                        setMargins(8, 8, 8, 8)
+                        val margen = dpMain(5)
+                        setMargins(margen, margen, margen, margen)
                     }
                     layoutParams = p
 
@@ -2299,13 +2415,32 @@ class MainActivity : AppCompatActivity() {
                     val btnApp = Button(this).apply {
                         text = appName
                         setTextColor(Color.WHITE)
-                        textSize = 16f
-                        typeface = Typeface.DEFAULT_BOLD
-                        backgroundTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#2563EB"))
-                        elevation = 8f
+                        textSize = 14f
+                        setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
+                        isAllCaps = false
+                        gravity = Gravity.CENTER
+                        maxLines = 2
+                        ellipsize = android.text.TextUtils.TruncateAt.END
+                        backgroundTintList = null
+                        background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_main_action_app)
+                        elevation = 0f
+                        contentDescription = getString(R.string.main_app_action_description, appName)
+                        setPadding(dpMain(8), dpMain(8), dpMain(8), dpMain(8))
+                        val icono = try {
+                            appInfo.loadIcon(pm).mutate()
+                        } catch (_: Exception) {
+                            ContextCompat.getDrawable(this@MainActivity, R.drawable.ic_it_apps)?.mutate()
+                        }
+                        icono?.let {
+                            val lado = dpMain(24)
+                            it.setBounds(0, 0, lado, lado)
+                            setCompoundDrawables(null, it, null, null)
+                            compoundDrawablePadding = dpMain(5)
+                        }
 
                         val p = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply {
-                            setMargins(8, 8, 8, 8)
+                            val margen = dpMain(5)
+                            setMargins(margen, margen, margen, margen)
                         }
                         layoutParams = p
 
@@ -2330,7 +2465,10 @@ class MainActivity : AppCompatActivity() {
                 if (index % 2 == 0) {
                     filaActual = LinearLayout(this).apply {
                         orientation = LinearLayout.HORIZONTAL
-                        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 180)
+                        layoutParams = LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT,
+                            dpMain(88)
+                        )
                     }
                     panelBase?.addView(filaActual)
                 }
@@ -2704,6 +2842,14 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun aplicarIndicadorPrincipal(id: Int, texto: String, color: Int) {
+        findViewById<TextView>(id)?.apply {
+            text = texto
+            setTextColor(color)
+            TextViewCompat.setCompoundDrawableTintList(this, ColorStateList.valueOf(color))
+        }
+    }
+
     private fun actualizarIndicadoresReales() {
         try {
             val batteryStatus = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
@@ -2712,51 +2858,113 @@ class MainActivity : AppCompatActivity() {
             val status = batteryStatus?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
             val pct = if (scale > 0) (level * 100) / scale else 0
             val isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL
-            val iconoBateria = if (isCharging) "⚡" else "🔋"
-            findViewById<TextView>(R.id.tvBateria)?.text = "$iconoBateria $pct%"
+            val colorBateria = when {
+                pct <= 15 -> Color.parseColor("#FF6B6B")
+                isCharging -> Color.parseColor("#FFE58A")
+                else -> Color.parseColor("#9CFF9F")
+            }
+            aplicarIndicadorPrincipal(
+                R.id.tvBateria,
+                getString(R.string.main_status_battery_value, pct),
+                colorBateria
+            )
         } catch (e: Exception) { e.printStackTrace() }
 
         try {
             val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-            val tvWifi = findViewById<TextView>(R.id.tvWifi)
-
-            var estadoWifi = "❌ Wi-Fi"
-            var estadoDatos = "❌ Datos"
-            var wifiActivo = false
-            var datosActivos = false
+            var wifiDetectado = false
+            var wifiValidado = false
+            var datosDetectados = false
+            var datosValidados = false
+            var internetValidado = false
 
             val networks = cm.allNetworks
             for (network in networks) {
                 val capabilities = cm.getNetworkCapabilities(network) ?: continue
                 val tieneInternet = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
                         capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+                internetValidado = internetValidado || tieneInternet
 
                 if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
-                    if (tieneInternet || capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_IMS)) {
-                        estadoWifi = "🟢 Wi-Fi"
-                        wifiActivo = true
-                    } else if (!wifiActivo) {
-                        estadoWifi = "🟠 Wi-Fi (!)"
-                    }
+                    wifiDetectado = true
+                    wifiValidado = wifiValidado || tieneInternet
                 }
 
                 if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) {
-                    if (tieneInternet || capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_IMS)) {
-                        estadoDatos = "📶 Datos"
-                        datosActivos = true
-                    } else if (!datosActivos) {
-                        estadoDatos = "🟠 Datos (!)"
-                    }
+                    datosDetectados = true
+                    datosValidados = datosValidados || tieneInternet
                 }
             }
 
-            tvWifi?.text = "$estadoWifi | $estadoDatos"
-            if (wifiActivo || datosActivos) {
-                tvWifi?.setTextColor(Color.parseColor("#00C853"))
-            } else {
-                tvWifi?.setTextColor(Color.parseColor("#C8102E"))
-            }
+            val verde = Color.parseColor("#9CFF9F")
+            val ambar = Color.parseColor("#FFE58A")
+            val rojo = Color.parseColor("#FF6B6B")
+            aplicarIndicadorPrincipal(
+                R.id.tvWifi,
+                when {
+                    wifiValidado -> getString(R.string.main_status_wifi_ok)
+                    wifiDetectado -> getString(R.string.main_status_wifi_no_network)
+                    else -> getString(R.string.main_status_wifi_off)
+                },
+                when {
+                    wifiValidado -> verde
+                    wifiDetectado -> ambar
+                    else -> rojo
+                }
+            )
+            aplicarIndicadorPrincipal(
+                R.id.tvInternet,
+                getString(
+                    if (internetValidado) R.string.main_status_internet_ok
+                    else R.string.main_status_internet_off
+                ),
+                if (internetValidado) verde else rojo
+            )
+            aplicarIndicadorPrincipal(
+                R.id.tvDatos,
+                when {
+                    datosValidados -> getString(R.string.main_status_data_ok)
+                    datosDetectados -> getString(R.string.main_status_data_limited)
+                    else -> getString(R.string.main_status_data_off)
+                },
+                when {
+                    datosValidados -> verde
+                    datosDetectados -> ambar
+                    else -> rojo
+                }
+            )
 
+            val modoAvion = Settings.Global.getInt(
+                contentResolver,
+                Settings.Global.AIRPLANE_MODE_ON,
+                0
+            ) == 1
+            aplicarIndicadorPrincipal(
+                R.id.tvModoAvion,
+                getString(
+                    if (modoAvion) R.string.main_status_airplane_on
+                    else R.string.main_status_airplane_off
+                ),
+                if (modoAvion) ambar else verde
+            )
+            aplicarIndicadorPrincipal(
+                R.id.tvVoWifi,
+                getString(R.string.main_status_vowifi_unverified),
+                ambar
+            )
+
+            val estadoGeneral = findViewById<TextView>(R.id.tvEstadoGeneral)
+            if (internetValidado) {
+                estadoGeneral?.text = getString(R.string.main_terminal_operational)
+                estadoGeneral?.setTextColor(verde)
+                ultimoEstadoConexionTexto = getString(R.string.screensaver_connection_operational)
+                ultimoEstadoConexionColor = verde
+            } else {
+                estadoGeneral?.text = getString(R.string.main_terminal_no_internet)
+                estadoGeneral?.setTextColor(ambar)
+                ultimoEstadoConexionTexto = getString(R.string.screensaver_connection_offline)
+                ultimoEstadoConexionColor = ambar
+            }
         } catch (e: Exception) { e.printStackTrace() }
     }
 
@@ -2767,6 +2975,7 @@ class MainActivity : AppCompatActivity() {
         handler.removeCallbacks(runnableAutoCheckOTA)
         handler.removeCallbacks(runnableReloj)
         handlerInactividad.removeCallbacks(runnableScreensaver)
+        detenerMovimientoScreensaver()
 
         if (::tts.isInitialized) {
             tts.stop()
@@ -3032,16 +3241,30 @@ class MainActivity : AppCompatActivity() {
         }
 
         val pinCorrecto = prefs.getString("pin_it", "1234")
-        val input = EditText(this).apply {
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
-            gravity = Gravity.CENTER
+        val contenido = layoutInflater.inflate(R.layout.dialog_it_access, null)
+        val input = contenido.findViewById<EditText>(R.id.etItAccessPin)
+        val togglePassword = contenido.findViewById<ImageButton>(R.id.btnToggleItPassword)
+        var passwordVisible = false
+        togglePassword.setOnClickListener {
+            passwordVisible = !passwordVisible
+            input.transformationMethod = if (passwordVisible) {
+                null
+            } else {
+                PasswordTransformationMethod.getInstance()
+            }
+            input.setSelection(input.text?.length ?: 0)
+            togglePassword.setImageResource(
+                if (passwordVisible) R.drawable.ic_main_eye_off else R.drawable.ic_main_eye
+            )
+            togglePassword.contentDescription = getString(
+                if (passwordVisible) R.string.it_access_hide_password
+                else R.string.it_access_show_password
+            )
         }
 
         val builder = AlertDialog.Builder(this)
-            .setTitle("Panel de Acceso IT")
-            .setMessage("Introduce Código de Acceso:")
-            .setView(input)
-            .setPositiveButton("Entrar") { _, _ ->
+            .setView(contenido)
+            .setPositiveButton("ENTRAR") { _, _ ->
                 val codigoMetido = input.text.toString()
 
                 if (codigoMetido == "*###9999#" || codigoMetido == pinCorrecto) {
@@ -3076,8 +3299,37 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             }
-            .setNegativeButton("Cancelar", null)
-        builder.show()
+            .setNegativeButton("CANCELAR", null)
+
+        val dialog = builder.create()
+        dialog.setOnShowListener {
+            val verde = Color.parseColor("#9CFF9F")
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.apply {
+                setTextColor(verde)
+                setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
+                backgroundTintList = null
+                background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_retro_button_primary)
+                minHeight = dpMain(48)
+                setPadding(dpMain(14), 0, dpMain(14), 0)
+            }
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.apply {
+                setTextColor(Color.parseColor("#B9F7C1"))
+                setTypeface(Typeface.MONOSPACE, Typeface.BOLD)
+                backgroundTintList = null
+                background = ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_retro_button_outline)
+                minHeight = dpMain(48)
+                setPadding(dpMain(14), 0, dpMain(14), 0)
+            }
+        }
+        dialog.window?.apply {
+            setBackgroundDrawable(ContextCompat.getDrawable(this@MainActivity, R.drawable.bg_it_access_dialog))
+            setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        }
+        dialog.show()
+        dialog.window?.setLayout(
+            (resources.displayMetrics.widthPixels * 0.92f).toInt(),
+            WindowManager.LayoutParams.WRAP_CONTENT
+        )
     }
 
     private var dialogoOTA: Dialog? = null

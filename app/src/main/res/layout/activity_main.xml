@@ -1,120 +1,237 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/mainRoot"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#F0F2F5"
+    android:background="#000000"
     android:orientation="vertical"
-    android:paddingLeft="12dp"
-    android:paddingTop="24dp"
-    android:paddingRight="12dp"
-    android:paddingBottom="32dp">
+    android:paddingStart="12dp"
+    android:paddingEnd="12dp"
+    tools:ignore="Overdraw">
 
-    <RelativeLayout
+    <LinearLayout
+        android:id="@+id/statusPanel"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="12dp"
-        android:paddingHorizontal="8dp">
+        android:layout_marginTop="8dp"
+        android:layout_marginBottom="10dp"
+        android:background="@drawable/bg_main_status"
+        android:orientation="vertical"
+        android:padding="7dp">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/tvWifi"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:fontFamily="monospace"
+                android:gravity="center_vertical"
+                android:minHeight="28dp"
+                android:text="@string/main_status_wifi_pending"
+                android:textColor="#9CFF9F"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                app:drawableStartCompat="@drawable/ic_it_wifi" />
+
+            <TextView
+                android:id="@+id/tvInternet"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:fontFamily="monospace"
+                android:gravity="center_vertical"
+                android:minHeight="28dp"
+                android:text="@string/main_status_internet_pending"
+                android:textColor="#9CFF9F"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                app:drawableStartCompat="@drawable/ic_main_internet" />
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/tvDatos"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1.4"
+                android:fontFamily="monospace"
+                android:gravity="center_vertical"
+                android:maxLines="1"
+                android:minHeight="28dp"
+                android:text="@string/main_status_data_pending"
+                android:textColor="#9CFF9F"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                app:drawableStartCompat="@drawable/ic_main_mobile" />
+
+            <TextView
+                android:id="@+id/tvModoAvion"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:fontFamily="monospace"
+                android:gravity="center_vertical"
+                android:minHeight="28dp"
+                android:text="@string/main_status_airplane_pending"
+                android:textColor="#9CFF9F"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                app:drawableStartCompat="@drawable/ic_main_airplane" />
+
+            <TextView
+                android:id="@+id/tvBateria"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.65"
+                android:clickable="true"
+                android:focusable="true"
+                android:fontFamily="monospace"
+                android:gravity="center_vertical|end"
+                android:minHeight="28dp"
+                android:text="@string/main_status_battery_pending"
+                android:textColor="#9CFF9F"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                app:drawableStartCompat="@drawable/ic_main_battery" />
+        </LinearLayout>
 
         <TextView
-            android:id="@+id/tvWifi"
+            android:id="@+id/tvVoWifi"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_alignParentStart="true"
-            android:text="📶 Wi-Fi: Escaneando..."
-            android:textColor="#5F6368"
-            android:textSize="14sp"
-            android:textStyle="bold" />
+            android:layout_gravity="center_horizontal"
+            android:fontFamily="monospace"
+            android:gravity="center"
+            android:maxLines="1"
+            android:minHeight="28dp"
+            android:text="@string/main_status_vowifi_unverified"
+            android:textColor="#FFE58A"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            app:drawableStartCompat="@drawable/ic_main_phone" />
+    </LinearLayout>
 
-        <TextView
-            android:id="@+id/tvBateria"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_alignParentEnd="true"
-            android:clickable="true"
-            android:focusable="true"
-            android:text="🔋 100%"
-            android:textColor="#5F6368"
-            android:textSize="14sp"
-            android:textStyle="bold" />
-    </RelativeLayout>
-
-    <ImageView
-        android:id="@+id/logoEmpresa"
+    <LinearLayout
+        android:id="@+id/identityCard"
         android:layout_width="match_parent"
-        android:layout_height="75dp"
-        android:layout_marginBottom="4dp"
-        android:scaleType="centerInside"
-        android:src="@drawable/logo_corporativo" />
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="10dp"
+        android:background="@drawable/bg_main_card"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:paddingStart="12dp"
+        android:paddingTop="10dp"
+        android:paddingEnd="12dp"
+        android:paddingBottom="10dp">
+
+        <ImageView
+            android:id="@+id/logoEmpresa"
+            android:layout_width="match_parent"
+            android:layout_height="62dp"
+            android:contentDescription="@string/main_logo_content_description"
+            android:scaleType="centerInside"
+            android:src="@drawable/logo_corporativo" />
+
+        <TextView
+            android:id="@+id/tvUbicacionDispositivo"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:fontFamily="monospace"
+            android:text="@string/main_terminal_unassigned"
+            android:textColor="#FFE58A"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tvHoraReal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:fontFamily="monospace"
+            android:text="@string/main_clock_placeholder"
+            android:textColor="#9CFF9F"
+            android:textSize="38sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tvUltimaSincroVisual"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:fontFamily="monospace"
+            android:maxLines="2"
+            android:text="@string/main_sync_pending"
+            android:textColor="#6EB97A"
+            android:textSize="11sp" />
+
+        <TextView
+            android:id="@+id/tvEstadoGeneral"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:fontFamily="monospace"
+            android:text="@string/main_terminal_operational"
+            android:textColor="#9CFF9F"
+            android:textSize="11sp"
+            android:textStyle="bold" />
+    </LinearLayout>
 
     <TextView
         android:id="@+id/tvBannerUrgencia"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginBottom="8dp"
-        android:background="#C8102E"
-        android:textColor="#FFFFFF"
-        android:textSize="14sp"
-        android:textStyle="bold"
+        android:background="@drawable/bg_main_alert"
+        android:fontFamily="monospace"
         android:gravity="center"
         android:padding="10dp"
+        android:textColor="#FFFFFF"
+        android:textSize="12sp"
+        android:textStyle="bold"
         android:visibility="gone" />
 
     <TextView
-        android:id="@+id/tvUbicacionDispositivo"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="2dp"
-        android:gravity="center"
-        android:text="Ubicación no configurada"
-        android:textColor="#C8102E"
-        android:textSize="16sp"
-        android:textStyle="bold" />
-
-    <TextView
-        android:id="@+id/tvHoraReal"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="4dp"
-        android:gravity="center"
-        android:text="00:00:00"
-        android:textColor="#202124"
-        android:textSize="36sp"
-        android:textStyle="bold" />
-
-    <TextView
-        android:id="@+id/tvUltimaSincroVisual"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="8dp"
-        android:gravity="center"
-        android:text="🕒 Sincronizando agenda..."
-        android:textColor="#5F6368"
-        android:textSize="11sp" />
-
-    <TextView
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="12dp"
-        android:gravity="center"
-        android:letterSpacing="0.1"
-        android:text="CENTRAL DE COMUNICACIONES"
-        android:textColor="#80868B"
-        android:textSize="12sp"
-        android:textStyle="bold" />
+        android:layout_marginBottom="6dp"
+        android:fontFamily="monospace"
+        android:gravity="center_vertical"
+        android:minHeight="28dp"
+        android:text="@string/main_authorized_accesses"
+        android:textColor="#9CFF9F"
+        android:textSize="13sp"
+        android:textStyle="bold"
+        app:drawableStartCompat="@drawable/ic_it_apps" />
 
     <ScrollView
         android:id="@+id/scrollDinamico"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:fillViewport="true">
+        android:clipToPadding="false"
+        android:fillViewport="true"
+        android:overScrollMode="never"
+        android:scrollbarStyle="outsideOverlay">
 
         <LinearLayout
             android:id="@+id/panelBotonesDinamicos"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:paddingBottom="24dp" />
+            android:paddingBottom="16dp" />
     </ScrollView>
 
 </LinearLayout>
