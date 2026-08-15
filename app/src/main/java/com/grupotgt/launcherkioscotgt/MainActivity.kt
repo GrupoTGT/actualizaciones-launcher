@@ -1019,6 +1019,7 @@ class MainActivity : AppCompatActivity() {
     private var dialogLlamadaActiva: Dialog? = null
     private var dialogLlamadaEntrante: Dialog? = null
     private var dialogBloqueoRobo: Dialog? = null
+    private val handlerLlamadas = Handler(Looper.getMainLooper())
 
     private val runnableScreensaver = Runnable {
         mostrarScreensaverTGT()
@@ -1103,6 +1104,7 @@ class MainActivity : AppCompatActivity() {
                         mostrarPantallaLlamadaEntrante(nombreCaller, numeroEntrante)
                     }
                     TelephonyManager.EXTRA_STATE_IDLE -> {
+                        cancelarTareasLlamadaPendientes()
                         dialogLlamadaActiva?.dismiss()
                         dialogLlamadaEntrante?.dismiss()
                         liberarPantalla()
@@ -2492,17 +2494,50 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun cancelarTareasLlamadaPendientes() {
+        handlerLlamadas.removeCallbacksAndMessages(null)
+    }
+
     @SuppressLint("MissingPermission")
-    private fun colgarLlamadaReal() {
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                val telecomManager = getSystemService(Context.TELECOM_SERVICE) as TelecomManager
-                if (ContextCompat.checkSelfPermission(this, Manifest.permission.ANSWER_PHONE_CALLS) == PackageManager.PERMISSION_GRANTED) {
-                    telecomManager.endCall()
+    private fun colgarLlamadaReal(): Boolean {
+        cancelarTareasLlamadaPendientes()
+
+        return try {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+                AppLog.warning("Telefonía -> finalizar llamada no soportado en esta API.")
+                return false
+            }
+
+            if (ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.ANSWER_PHONE_CALLS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                AppLog.error("Telefonía -> no se puede finalizar: falta ANSWER_PHONE_CALLS.")
+                return false
+            }
+
+            val telecomManager = getSystemService(Context.TELECOM_SERVICE) as TelecomManager
+            val finalizada = telecomManager.endCall()
+            AppLog.info("Telefonía -> solicitud endCall resultado=$finalizada")
+
+            if (!finalizada) {
+                val telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
+                if (telephonyManager.callState != TelephonyManager.CALL_STATE_IDLE) {
+                    handlerLlamadas.postDelayed({
+                        try {
+                            val reintento = telecomManager.endCall()
+                            AppLog.info("Telefonía -> reintento endCall resultado=$reintento")
+                        } catch (e: Exception) {
+                            AppLog.error("Telefonía -> error en reintento endCall: ${e.message}")
+                        }
+                    }, 250L)
                 }
             }
+            finalizada
         } catch (e: Exception) {
             AppLog.error("Excepción al colgar llamada: ${e.message}")
+            false
         }
     }
 
@@ -2649,16 +2684,21 @@ class MainActivity : AppCompatActivity() {
 
                 if (esSaliente && numero.isNotEmpty()) {
                     val numLimpio = numero.replace(" ", "")
-                    Handler(Looper.getMainLooper()).postDelayed({
+                    cancelarTareasLlamadaPendientes()
+                    handlerLlamadas.postDelayed({
                         try {
+                            if (dialogLlamadaActiva?.isShowing != true) {
+                                AppLog.info("Telefonía -> marcación cancelada antes de iniciar.")
+                                return@postDelayed
+                            }
                             val intentCall = Intent(Intent.ACTION_CALL, Uri.parse("tel:$numLimpio"))
                             this@MainActivity.startActivity(intentCall)
 
                             val intentBring = Intent(this@MainActivity, MainActivity::class.java).apply {
                                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
                             }
-                            Handler(Looper.getMainLooper()).postDelayed({ this@MainActivity.startActivity(intentBring) }, 500)
-                            Handler(Looper.getMainLooper()).postDelayed({ this@MainActivity.startActivity(intentBring) }, 1500)
+                            handlerLlamadas.postDelayed({ this@MainActivity.startActivity(intentBring) }, 500)
+                            handlerLlamadas.postDelayed({ this@MainActivity.startActivity(intentBring) }, 1500)
                         } catch (e: Exception) {
                             AppLog.error("Error marcando: ${e.message}")
                         }
@@ -2803,6 +2843,7 @@ class MainActivity : AppCompatActivity() {
         handler.removeCallbacks(runnableAutoCheckOTA)
         handler.removeCallbacks(runnableReloj)
         handlerInactividad.removeCallbacks(runnableScreensaver)
+        cancelarTareasLlamadaPendientes()
         detenerMovimientoScreensaver()
 
         if (::tts.isInitialized) {
