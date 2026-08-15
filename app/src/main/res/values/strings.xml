@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Launcher Kiosco TGT</string>
+    <string name="retro_antenna_content_description">Antena analizando señal de red</string>
 </resources>

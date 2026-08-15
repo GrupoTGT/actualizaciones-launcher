@@ -33,6 +33,7 @@ import android.view.WindowManager
 import android.widget.ArrayAdapter
 import android.widget.AutoCompleteTextView
 import android.widget.Button
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
@@ -651,6 +652,14 @@ class ItActivity : AppCompatActivity() {
             background = fondoRetro(Color.parseColor("#020704"), verde, 0, 1)
         }
 
+        root.addView(ImageView(this).apply {
+            setImageResource(R.drawable.ic_retro_network_antenna)
+            contentDescription = getString(R.string.retro_antenna_content_description)
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+        }, LinearLayout.LayoutParams(dp(72), dp(52)).apply {
+            gravity = Gravity.CENTER_HORIZONTAL
+            bottomMargin = dp(4)
+        })
         root.addView(textoRetro("// ANALIZADOR DE RED", 23f, verde, true, Gravity.CENTER))
         root.addView(textoRetro("TGT NET-SCAN 64  ·  DIAGNÓSTICO EN TIEMPO REAL", 11f, Color.parseColor("#6FCB78"), false, Gravity.CENTER).apply {
             setPadding(0, dp(3), 0, dp(14))
