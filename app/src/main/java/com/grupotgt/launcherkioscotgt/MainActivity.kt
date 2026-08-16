@@ -57,6 +57,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.widget.TextViewCompat
+import com.grupotgt.launcherkioscotgt.mdm.MdmEnrollmentCoordinator
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.OkHttpClient
@@ -949,6 +950,7 @@ class MainActivity : AppCompatActivity() {
 
     private val URL_GOOGLE_SHEETS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSye0TO9CYH8xXSPy-rCNDOO4UjiNdmp32SiOWLwxsUPI25ZW9rHW44JlAPn38_4vVpJK5Pw6tu5Ct0/pub?output=csv"
     private val URL_OTA_JSON = "https://grupotgt.github.io/actualizaciones-launcher/version.json"
+    private val URL_MDM_SAFE_BRIDGE = "https://script.google.com/macros/s/AKfycby2-olpj2Y9wryLca77Jd5a01nROHf8C2XvyfU_wlk94DlAjR9mGE81uTwCPLj-x0E5/exec"
 
     private val handler = Handler(Looper.getMainLooper())
 
@@ -1218,6 +1220,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             cargarIdentificacionYLogo()
+            MdmEnrollmentCoordinator.enroll(this, URL_MDM_SAFE_BRIDGE)
             cargarAgendaDesdeCache()
             descargarAgendaNube(modoSilencioso = true)
 
