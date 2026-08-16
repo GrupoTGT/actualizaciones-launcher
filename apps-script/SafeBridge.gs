@@ -74,7 +74,8 @@ function enroll_(request) {
       credential_fingerprint: fingerprint,
       terminal: registration.terminal,
       profile_id: registration.approvalState === 'APPROVED' ? registration.profileId : 'PENDIENTE_SEGURO',
-      mode: registration.approvalState === 'APPROVED' ? safeMode_(registration.mode) : 'BLINDADO'
+      mode: registration.approvalState === 'APPROVED' ? safeMode_(registration.mode) : 'BLINDADO',
+      mode_revision: registration.modeRevision
     };
     audit_('INFO', 'ENROLL_OK', request.device_id + ' state=' + registration.approvalState);
     return signedResponse_(request.device_id, request.nonce, data, proposedSecret);
@@ -235,7 +236,8 @@ function upsertPendingRegistration_(deviceId, payload, fingerprint) {
     commandsEnabled: commandsEnabled,
     terminal: String(terminals.getRange(row, 2).getValue()),
     profileId: String(terminals.getRange(row, 4).getValue() || 'PENDIENTE_SEGURO'),
-    mode: String(terminals.getRange(row, 5).getValue() || 'BLINDADO')
+    mode: String(terminals.getRange(row, 5).getValue() || 'BLINDADO'),
+    modeRevision: Math.max(0, Number(devices.getRange(deviceRow, 36).getValue()) || 0)
   };
 }
 

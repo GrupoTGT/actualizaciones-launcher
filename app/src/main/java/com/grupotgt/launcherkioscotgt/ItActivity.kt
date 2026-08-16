@@ -45,6 +45,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import com.grupotgt.launcherkioscotgt.mdm.InternalCommandGate
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.OkHttpClient
@@ -480,6 +481,10 @@ class ItActivity : AppCompatActivity() {
             Toast.makeText(this, "Abriendo motor OTA del Launcher...", Toast.LENGTH_SHORT).show()
             val otaIntent = Intent(this, MainActivity::class.java).apply {
                 putExtra(MainActivity.EXTRA_FORZAR_OTA, true)
+                putExtra(
+                    MainActivity.EXTRA_INTERNAL_COMMAND_TOKEN,
+                    InternalCommandGate.issue(this@ItActivity, InternalCommandGate.ACTION_FORCE_OTA)
+                )
                 addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             }
             startActivity(otaIntent)
@@ -558,6 +563,13 @@ class ItActivity : AppCompatActivity() {
         val intent = Intent(this, MainActivity::class.java).apply {
             putExtra(MainActivity.EXTRA_MANTENIMIENTO_MS, duracionMs)
             putExtra(MainActivity.EXTRA_ABRIR_AJUSTES, false)
+            putExtra(
+                MainActivity.EXTRA_INTERNAL_COMMAND_TOKEN,
+                InternalCommandGate.issue(
+                    this@ItActivity,
+                    InternalCommandGate.ACTION_START_MAINTENANCE
+                )
+            )
             addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         }
 
@@ -570,6 +582,13 @@ class ItActivity : AppCompatActivity() {
 
         val intent = Intent(this, MainActivity::class.java).apply {
             putExtra(MainActivity.EXTRA_FINALIZAR_MANTENIMIENTO, true)
+            putExtra(
+                MainActivity.EXTRA_INTERNAL_COMMAND_TOKEN,
+                InternalCommandGate.issue(
+                    this@ItActivity,
+                    InternalCommandGate.ACTION_FINISH_MAINTENANCE
+                )
+            )
             addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         }
 

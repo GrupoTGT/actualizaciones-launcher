@@ -16,7 +16,8 @@ internal data class MdmEnrollmentResult(
     val credentialFingerprint: String,
     val terminal: String,
     val profileId: String,
-    val mode: String
+    val mode: String,
+    val modeRevision: Long
 )
 
 internal class MdmEnrollmentClient(
@@ -121,7 +122,8 @@ internal class MdmEnrollmentClient(
             credentialFingerprint = data.getString("credential_fingerprint"),
             terminal = data.optString("terminal"),
             profileId = data.optString("profile_id", "PENDIENTE_SEGURO"),
-            mode = mode
+            mode = mode,
+            modeRevision = data.optLong("mode_revision", 0L).coerceAtLeast(0L)
         )
     }
 

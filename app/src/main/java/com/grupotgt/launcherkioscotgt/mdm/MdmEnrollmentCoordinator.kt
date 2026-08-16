@@ -8,7 +8,11 @@ import com.grupotgt.launcherkioscotgt.AppLog
 
 internal object MdmEnrollmentCoordinator {
     @SuppressLint("HardwareIds") // Must preserve the fleet's existing ANDROID_ID identity.
-    fun enroll(context: Context, endpoint: String) {
+    fun enroll(
+        context: Context,
+        endpoint: String,
+        onAuthenticatedEnrollment: ((MdmEnrollmentResult) -> Unit)? = null
+    ) {
         val appContext = context.applicationContext
         val credentialStore = MdmCredentialStore(appContext)
         val deviceId = Settings.Secure.getString(
@@ -47,6 +51,7 @@ internal object MdmEnrollmentCoordinator {
                         "MDM SAFE BRIDGE -> autoalta ${enrollment.approvalState}; " +
                             "huella=${enrollment.credentialFingerprint}; comandos=${enrollment.commandsEnabled}"
                     )
+                    onAuthenticatedEnrollment?.invoke(enrollment)
                 }.onFailure { error ->
                     AppLog.error("MDM SAFE BRIDGE -> autoalta no confirmada: ${error.message}")
                 }

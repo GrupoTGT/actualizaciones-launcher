@@ -57,6 +57,9 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.widget.TextViewCompat
+import com.grupotgt.launcherkioscotgt.mdm.InternalCommandGate
+import com.grupotgt.launcherkioscotgt.mdm.ManagedMode
+import com.grupotgt.launcherkioscotgt.mdm.ManagedModeStore
 import com.grupotgt.launcherkioscotgt.mdm.MdmEnrollmentCoordinator
 import okhttp3.Call
 import okhttp3.Callback
@@ -329,7 +332,7 @@ object MaintenanceModeManager {
     }
 
     fun refrescarAllowlistMantenimiento(context: Context): Boolean {
-        if (!estaActivo(context)) return false
+        if (!estaActivo(context) && !ManagedModeStore.isManagedFree(context)) return false
 
         return try {
             val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
@@ -385,15 +388,8 @@ object MaintenanceModeManager {
                 return false
             }
 
-            // 2) TGT deja de ser candidato HOME de forma física, no sólo por preferencia.
-            try {
-                habilitarHomeAlias(context, false)
-            } catch (e: Exception) {
-                AppLog.error("IT MANTENIMIENTO -> no se pudo deshabilitar HOME alias TGT: ${e.message}")
-                return false
-            }
-
-            // 3) Retiramos la política HOME de TGT y fijamos explícitamente One UI Home.
+            // 2) Fijamos primero el HOME OEM mientras TGT todavía sigue habilitado. Así una
+            // interrupción en mitad de la transición nunca deja el dispositivo sin candidato HOME.
             try {
                 dpm.clearPackagePersistentPreferredActivities(admin, context.packageName)
                 AppLog.info("IT MANTENIMIENTO -> preferencia HOME persistente de TGT eliminada.")
@@ -411,27 +407,32 @@ object MaintenanceModeManager {
                 "IT MANTENIMIENTO -> One UI Home fijado como HOME temporal: ${launcherNativo.flattenToShortString()}"
             )
 
-            val homeResuelto = try {
-                val homeIntent = Intent(Intent.ACTION_MAIN).apply {
-                    addCategory(Intent.CATEGORY_HOME)
-                    addCategory(Intent.CATEGORY_DEFAULT)
-                }
-                val ri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    context.packageManager.resolveActivity(
-                        homeIntent,
-                        PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_DEFAULT_ONLY.toLong())
-                    )
-                } else {
-                    @Suppress("DEPRECATION")
-                    context.packageManager.resolveActivity(homeIntent, PackageManager.MATCH_DEFAULT_ONLY)
-                }
-                ri?.activityInfo?.let { ComponentName(it.packageName, it.name) }
-            } catch (_: Exception) { null }
+            val homeAntesDeDeshabilitar = resolverHomeActual(context)
+            if (homeAntesDeDeshabilitar != launcherNativo) {
+                AppLog.error(
+                    "IT MANTENIMIENTO -> HOME OEM no quedó fijado; resuelto=" +
+                        (homeAntesDeDeshabilitar?.flattenToShortString() ?: "<ninguno>")
+                )
+                return false
+            }
 
-            AppLog.info(
-                "IT MANTENIMIENTO -> HOME resuelto después del cambio=" +
-                        (homeResuelto?.flattenToShortString() ?: "<ninguno>")
-            )
+            // 3) Sólo después de verificar One UI, TGT deja de ser candidato HOME.
+            try {
+                habilitarHomeAlias(context, false)
+            } catch (e: Exception) {
+                AppLog.error("IT MANTENIMIENTO -> no se pudo deshabilitar HOME alias TGT: ${e.message}")
+                return false
+            }
+
+            val homeFinal = resolverHomeActual(context)
+            if (homeFinal != launcherNativo) {
+                AppLog.error(
+                    "IT MANTENIMIENTO -> HOME final no coincide con OEM; rollback seguro. Resuelto=" +
+                        (homeFinal?.flattenToShortString() ?: "<ninguno>")
+                )
+                habilitarHomeAlias(context, true)
+                return false
+            }
 
             // 4) Abrimos el launcher Samsung por componente exacto. El diagnóstico ADB ya confirmó
             // que este componente arranca correctamente cuando LockTask está en NONE.
@@ -454,6 +455,27 @@ object MaintenanceModeManager {
         } catch (e: Exception) {
             AppLog.error("IT MANTENIMIENTO -> error cediendo HOME a One UI: ${e.message}")
             false
+        }
+    }
+
+    fun resolverHomeActual(context: Context): ComponentName? {
+        return try {
+            val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_HOME)
+                addCategory(Intent.CATEGORY_DEFAULT)
+            }
+            val result = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                context.packageManager.resolveActivity(
+                    homeIntent,
+                    PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_DEFAULT_ONLY.toLong())
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                context.packageManager.resolveActivity(homeIntent, PackageManager.MATCH_DEFAULT_ONLY)
+            }
+            result?.activityInfo?.let { ComponentName(it.packageName, it.name) }
+        } catch (_: Exception) {
+            null
         }
     }
 
@@ -549,9 +571,13 @@ object MaintenanceModeManager {
 }
 
 object KioskPolicyManager {
-    fun aplicar(context: Context): Boolean {
+    fun aplicar(context: Context, forceBlindado: Boolean = false): Boolean {
         if (MaintenanceModeManager.estaActivo(context)) {
             AppLog.info("KIOSK POLICY -> omitida porque Modo Mantenimiento IT está activo.")
+            return false
+        }
+        if (!forceBlindado && ManagedModeStore.isManagedFree(context)) {
+            AppLog.info("KIOSK POLICY -> omitida porque el modo deseado es LIBRE GESTIONADO.")
             return false
         }
 
@@ -592,6 +618,15 @@ object KioskPolicyManager {
             val homeActivity = ComponentName(context.packageName, "${context.packageName}.HomeActivity")
             dpm.addPersistentPreferredActivity(admin, homeFilter, homeActivity)
 
+            val homeResuelto = MaintenanceModeManager.resolverHomeActual(context)
+            if (homeResuelto != homeActivity) {
+                AppLog.error(
+                    "KIOSK POLICY -> HOME TGT no quedó resuelto; actual=" +
+                        (homeResuelto?.flattenToShortString() ?: "<ninguno>")
+                )
+                return false
+            }
+
             val permitido = dpm.isLockTaskPermitted(context.packageName)
             AppLog.success(
                 "KIOSK POLICY -> HOME persistente aplicado | LockTaskPermitido=$permitido | " +
@@ -614,11 +649,16 @@ class BootAndReplacedReceiver : BroadcastReceiver() {
 
         when (accion) {
             Intent.ACTION_BOOT_COMPLETED -> {
-                // Un reinicio SIEMPRE cancela mantenimiento: el terminal vuelve seguro.
+                // Un reinicio cancela el mantenimiento IT temporal, pero conserva el modo
+                // gestionado autenticado y persistido.
                 MaintenanceModeManager.finalizarEstado(ctx, "reinicio del dispositivo")
-                AppLog.info("BOOT -> mantenimiento cancelado por seguridad. Restaurando HOME/Kiosco...")
-                val politicaOk = KioskPolicyManager.aplicar(ctx)
-                AppLog.info("BOOT -> política kiosco aplicada=$politicaOk")
+                if (ManagedModeStore.isManagedFree(ctx)) {
+                    val libreOk = MaintenanceModeManager.suspenderPoliticasKiosco(ctx)
+                    AppLog.info("BOOT -> LIBRE GESTIONADO restaurado=$libreOk")
+                } else {
+                    val politicaOk = KioskPolicyManager.aplicar(ctx)
+                    AppLog.info("BOOT -> política kiosco aplicada=$politicaOk")
+                }
                 abrirLauncher(ctx)
             }
 
@@ -632,6 +672,10 @@ class BootAndReplacedReceiver : BroadcastReceiver() {
                         "PACKAGE_REPLACED -> mantenimiento sigue activo (${MaintenanceModeManager.descripcion(ctx)}). " +
                                 "HOME alias continúa deshabilitado. Suspendido=$suspendido"
                     )
+                } else if (ManagedModeStore.isManagedFree(ctx)) {
+                    val libreOk = MaintenanceModeManager.suspenderPoliticasKiosco(ctx)
+                    AppLog.info("PACKAGE_REPLACED -> LIBRE GESTIONADO restaurado=$libreOk")
+                    abrirLauncher(ctx)
                 } else {
                     AppLog.info("PACKAGE_REPLACED -> mantenimiento inactivo. Restaurando HOME/Kiosco...")
                     val politicaOk = KioskPolicyManager.aplicar(ctx)
@@ -678,8 +722,13 @@ class MaintenanceExpiryReceiver : BroadcastReceiver() {
         }
 
         MaintenanceModeManager.finalizarEstado(ctx, "tiempo agotado")
-        val politicaOk = KioskPolicyManager.aplicar(ctx)
-        AppLog.success("IT MANTENIMIENTO -> tiempo agotado. Kiosco restaurado=$politicaOk")
+        if (ManagedModeStore.isManagedFree(ctx)) {
+            val libreOk = MaintenanceModeManager.suspenderPoliticasKiosco(ctx)
+            AppLog.success("IT MANTENIMIENTO -> tiempo agotado. LIBRE restaurado=$libreOk")
+        } else {
+            val politicaOk = KioskPolicyManager.aplicar(ctx)
+            AppLog.success("IT MANTENIMIENTO -> tiempo agotado. Kiosco restaurado=$politicaOk")
+        }
 
         try {
             val i = Intent(ctx, MainActivity::class.java).apply {
@@ -946,6 +995,7 @@ class MainActivity : AppCompatActivity() {
         const val EXTRA_MANTENIMIENTO_MS = "com.grupotgt.launcherkioscotgt.EXTRA_MANTENIMIENTO_MS"
         const val EXTRA_ABRIR_AJUSTES = "com.grupotgt.launcherkioscotgt.EXTRA_ABRIR_AJUSTES"
         const val EXTRA_FINALIZAR_MANTENIMIENTO = "com.grupotgt.launcherkioscotgt.EXTRA_FINALIZAR_MANTENIMIENTO"
+        const val EXTRA_INTERNAL_COMMAND_TOKEN = "com.grupotgt.launcherkioscotgt.EXTRA_INTERNAL_COMMAND_TOKEN"
     }
 
     private val URL_GOOGLE_SHEETS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSye0TO9CYH8xXSPy-rCNDOO4UjiNdmp32SiOWLwxsUPI25ZW9rHW44JlAPn38_4vVpJK5Pw6tu5Ct0/pub?output=csv"
@@ -1131,6 +1181,8 @@ class MainActivity : AppCompatActivity() {
                 AppLog.warning(
                     "IT MANTENIMIENTO -> Launcher iniciado en modo mantenimiento (${MaintenanceModeManager.descripcion(this)})."
                 )
+            } else if (ManagedModeStore.isManagedFree(this)) {
+                AppLog.info("MDM MODO -> arranque conserva LIBRE GESTIONADO; no se aplica kiosco.")
             } else {
                 KioskPolicyManager.aplicar(this)
             }
@@ -1189,8 +1241,10 @@ class MainActivity : AppCompatActivity() {
 
             procesarIntentMantenimiento(intent)
 
-            if (!MaintenanceModeManager.estaActivo(this)) {
+            if (!MaintenanceModeManager.estaActivo(this) && !ManagedModeStore.isManagedFree(this)) {
                 entrarEnKioscoSiPermitido("onCreate")
+            } else if (ManagedModeStore.isManagedFree(this)) {
+                handler.post { reconciliarModoGestionado("onCreate") }
             } else {
                 AppLog.info("IT MANTENIMIENTO -> no se activa LockTask en onCreate.")
             }
@@ -1220,13 +1274,33 @@ class MainActivity : AppCompatActivity() {
             }
 
             cargarIdentificacionYLogo()
-            MdmEnrollmentCoordinator.enroll(this, URL_MDM_SAFE_BRIDGE)
+            MdmEnrollmentCoordinator.enroll(this, URL_MDM_SAFE_BRIDGE) { enrollment ->
+                if (enrollment.approvalState == "APPROVED" && enrollment.commandsEnabled) {
+                    runOnUiThread {
+                        val accepted = ManagedModeStore.acceptAuthenticated(
+                            this,
+                            enrollment.mode,
+                            enrollment.modeRevision
+                        )
+                        if (accepted) {
+                            reconciliarModoGestionado("SAFE BRIDGE rev=${enrollment.modeRevision}")
+                        } else {
+                            AppLog.warning(
+                                "MDM MODO -> orden rechazada por revisión obsoleta o contradictoria."
+                            )
+                        }
+                    }
+                }
+            }
             cargarAgendaDesdeCache()
             descargarAgendaNube(modoSilencioso = true)
 
-            val otaForzadaDesdePanel = intent?.getBooleanExtra(EXTRA_FORZAR_OTA, false) == true
+            val otaForzadaDesdePanel = consumirComandoInterno(
+                intent,
+                EXTRA_FORZAR_OTA,
+                InternalCommandGate.ACTION_FORCE_OTA
+            )
             if (otaForzadaDesdePanel) {
-                intent?.removeExtra(EXTRA_FORZAR_OTA)
                 AppLog.ota("OTA manual solicitada desde Panel IT. Ejecutando motor OTA único.")
                 comprobarActualizacionOTA(forzada = true)
             } else {
@@ -1282,8 +1356,12 @@ class MainActivity : AppCompatActivity() {
 
         if (procesarIntentMantenimiento(intent)) return
 
-        if (intent.getBooleanExtra(EXTRA_FORZAR_OTA, false)) {
-            intent.removeExtra(EXTRA_FORZAR_OTA)
+        if (consumirComandoInterno(
+                intent,
+                EXTRA_FORZAR_OTA,
+                InternalCommandGate.ACTION_FORCE_OTA
+            )
+        ) {
             AppLog.ota("OTA manual recibida con MainActivity ya activa. Ejecutando motor OTA único.")
             comprobarActualizacionOTA(forzada = true)
         }
@@ -1293,7 +1371,12 @@ class MainActivity : AppCompatActivity() {
         if (intent == null) return false
 
         if (intent.getBooleanExtra(EXTRA_FINALIZAR_MANTENIMIENTO, false)) {
-            intent.removeExtra(EXTRA_FINALIZAR_MANTENIMIENTO)
+            if (!consumirComandoInterno(
+                    intent,
+                    EXTRA_FINALIZAR_MANTENIMIENTO,
+                    InternalCommandGate.ACTION_FINISH_MAINTENANCE
+                )
+            ) return true
             finalizarModoMantenimiento("cierre manual desde Panel IT")
             return true
         }
@@ -1301,13 +1384,30 @@ class MainActivity : AppCompatActivity() {
         if (intent.hasExtra(EXTRA_MANTENIMIENTO_MS)) {
             val duracionMs = intent.getLongExtra(EXTRA_MANTENIMIENTO_MS, 15L * 60L * 1000L)
             val abrirAjustes = intent.getBooleanExtra(EXTRA_ABRIR_AJUSTES, true)
-            intent.removeExtra(EXTRA_MANTENIMIENTO_MS)
             intent.removeExtra(EXTRA_ABRIR_AJUSTES)
+            if (!consumirComandoInterno(
+                    intent,
+                    EXTRA_MANTENIMIENTO_MS,
+                    InternalCommandGate.ACTION_START_MAINTENANCE
+                )
+            ) return true
             activarModoMantenimiento(duracionMs, abrirAjustes)
             return true
         }
 
         return false
+    }
+
+    private fun consumirComandoInterno(intent: Intent?, extra: String, action: String): Boolean {
+        if (intent?.hasExtra(extra) != true) return false
+        val token = intent.getStringExtra(EXTRA_INTERNAL_COMMAND_TOKEN)
+        intent.removeExtra(extra)
+        intent.removeExtra(EXTRA_INTERNAL_COMMAND_TOKEN)
+        val autorizado = InternalCommandGate.consume(this, action, token)
+        if (!autorizado) {
+            AppLog.warning("SEGURIDAD -> comando interno rechazado: $action")
+        }
+        return autorizado
     }
 
     private fun activarModoMantenimiento(duracionMs: Long, abrirAjustes: Boolean) {
@@ -1397,14 +1497,73 @@ class MainActivity : AppCompatActivity() {
     private fun finalizarModoMantenimiento(motivo: String) {
         try {
             MaintenanceModeManager.finalizarEstado(this, motivo)
-            val politicaOk = KioskPolicyManager.aplicar(this)
-            configurarModoKioscoEstricto()
-            entrarEnKioscoSiPermitido("fin mantenimiento")
-
-            AppLog.success("IT MANTENIMIENTO -> terminal protegido de nuevo. PoliticaOk=$politicaOk")
-            Toast.makeText(this, "🔒 Terminal protegido de nuevo", Toast.LENGTH_LONG).show()
+            reconciliarModoGestionado("fin mantenimiento")
+            Toast.makeText(this, "Modo gestionado restaurado", Toast.LENGTH_LONG).show()
         } catch (e: Exception) {
             AppLog.error("IT MANTENIMIENTO -> error restaurando kiosco: ${e.message}")
+        }
+    }
+
+    private fun reconciliarModoGestionado(origen: String) {
+        if (MaintenanceModeManager.estaActivo(this)) {
+            AppLog.info("MDM MODO -> reconciliación aplazada por mantenimiento IT activo.")
+            return
+        }
+
+        val mode = ManagedModeStore.desiredMode(this)
+        ManagedModeStore.markApplying(this, mode)
+        when (mode) {
+            ManagedMode.BLINDADO -> {
+                val policyOk = KioskPolicyManager.aplicar(this, forceBlindado = true)
+                entrarEnKioscoSiPermitido("modo BLINDADO: $origen")
+                val lockTaskOk = lockTaskEstaActivo()
+                if (policyOk && lockTaskOk) {
+                    ManagedModeStore.markApplied(this, mode)
+                    AppLog.success("MDM MODO -> BLINDADO aplicado y verificado desde $origen.")
+                } else {
+                    ManagedModeStore.markError(
+                        this,
+                        "BLINDADO incompleto: policy=$policyOk lockTask=$lockTaskOk"
+                    )
+                    AppLog.error(
+                        "MDM MODO -> BLINDADO no confirmado: policy=$policyOk lockTask=$lockTaskOk"
+                    )
+                }
+            }
+
+            ManagedMode.LIBRE_GESTIONADO -> {
+                try {
+                    stopLockTask()
+                } catch (error: Exception) {
+                    AppLog.warning("MDM MODO -> stopLockTask en LIBRE devolvió: ${error.message}")
+                }
+                val lockTaskLibre = !lockTaskEstaActivo()
+                val homeLibre = lockTaskLibre && MaintenanceModeManager.suspenderPoliticasKiosco(this)
+                if (lockTaskLibre && homeLibre) {
+                    ManagedModeStore.markApplied(this, mode)
+                    AppLog.success(
+                        "MDM MODO -> LIBRE GESTIONADO aplicado; Device Owner conservado. Origen=$origen"
+                    )
+                } else {
+                    ManagedModeStore.markError(
+                        this,
+                        "LIBRE incompleto: lockTaskLibre=$lockTaskLibre homeLibre=$homeLibre"
+                    )
+                    AppLog.error("MDM MODO -> LIBRE falló; ejecutando rollback a BLINDADO.")
+                    KioskPolicyManager.aplicar(this, forceBlindado = true)
+                    entrarEnKioscoSiPermitido("rollback LIBRE", forceBlindado = true)
+                }
+            }
+        }
+    }
+
+    private fun lockTaskEstaActivo(): Boolean {
+        val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            activityManager.lockTaskModeState != android.app.ActivityManager.LOCK_TASK_MODE_NONE
+        } else {
+            @Suppress("DEPRECATION")
+            activityManager.isInLockTaskMode
         }
     }
 
@@ -2906,8 +3065,9 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun esSeguroBloquearPantalla(): Boolean {
+    private fun esSeguroBloquearPantalla(forceBlindado: Boolean = false): Boolean {
         if (MaintenanceModeManager.estaActivo(this)) return false
+        if (!forceBlindado && ManagedModeStore.isManagedFree(this)) return false
 
         return try {
             val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
@@ -2918,13 +3078,17 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun entrarEnKioscoSiPermitido(origen: String) {
+    private fun entrarEnKioscoSiPermitido(origen: String, forceBlindado: Boolean = false) {
         if (MaintenanceModeManager.estaActivo(this)) {
             AppLog.info("KIOSK -> LockTask omitido desde $origen por mantenimiento IT activo.")
             return
         }
+        if (!forceBlindado && ManagedModeStore.isManagedFree(this)) {
+            AppLog.info("KIOSK -> LockTask omitido desde $origen por LIBRE GESTIONADO.")
+            return
+        }
 
-        if (esSeguroBloquearPantalla()) {
+        if (esSeguroBloquearPantalla(forceBlindado)) {
             try {
                 startLockTask()
                 AppLog.success("KIOSK -> LockTask activo solicitado desde $origen.")
@@ -2943,6 +3107,8 @@ class MainActivity : AppCompatActivity() {
         if (MaintenanceModeManager.estaActivo(this)) {
             MaintenanceModeManager.reprogramarSiActivo(this)
             AppLog.info("IT MANTENIMIENTO -> onResume sin reactivar kiosco (${MaintenanceModeManager.descripcion(this)}).")
+        } else if (ManagedModeStore.isManagedFree(this)) {
+            reconciliarModoGestionado("onResume")
         } else {
             configurarModoKioscoEstricto()
             entrarEnKioscoSiPermitido("onResume")

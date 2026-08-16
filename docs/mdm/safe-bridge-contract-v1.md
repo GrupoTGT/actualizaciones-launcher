@@ -4,6 +4,7 @@
 
 - Apps Script project: `1qv79yC0SqqdzguF0IOgym_wK8kCBM_-tdUFCn2ecXrNLDpZ6MlRifEc0`
 - Web App deployment: `AKfycby2-olpj2Y9wryLca77Jd5a01nROHf8C2XvyfU_wlk94DlAjR9mGE81uTwCPLj-x0E5`
+- Active deployment version: `4`.
 - Endpoint: `https://script.google.com/macros/s/AKfycby2-olpj2Y9wryLca77Jd5a01nROHf8C2XvyfU_wlk94DlAjR9mGE81uTwCPLj-x0E5/exec`
 - Execution identity: deploying operator.
 - Access: public endpoint; application-level access is restricted by the signed
@@ -51,6 +52,14 @@ digest. Object keys are sorted recursively for canonical JSON.
 - Android credentials are encrypted at rest using an Android Keystore key.
 - A credential already bound to a device cannot be silently replaced.
 - Responses are signed with the same per-device credential.
+
+## Managed mode command
+
+An approved enrollment response may include `mode` and `mode_revision`.
+Android accepts them only when `approval_state=APPROVED`, `commands_enabled=true`
+and the complete response signature is valid. Revisions are monotonic: an older
+revision or a different mode reusing the same revision is rejected. Missing or
+unknown mode values resolve to `BLINDADO`.
 
 ## Safe defaults
 
