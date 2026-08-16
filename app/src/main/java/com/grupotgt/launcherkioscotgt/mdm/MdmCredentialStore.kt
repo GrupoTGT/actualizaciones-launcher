@@ -4,6 +4,7 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
+import android.provider.Settings
 import java.nio.charset.StandardCharsets
 import java.security.KeyStore
 import javax.crypto.Cipher
@@ -12,6 +13,7 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 internal class MdmCredentialStore(context: Context) {
+    private val appContext = context.applicationContext
     private val preferences = context.applicationContext.getSharedPreferences(
         PREFERENCES,
         Context.MODE_PRIVATE
@@ -19,6 +21,7 @@ internal class MdmCredentialStore(context: Context) {
 
     @Synchronized
     fun getOrCreateSecret(): String {
+        ensureDeviceBinding()
         readSecret()?.let { return it }
         val secret = MdmCrypto.newDeviceSecret()
         persistSecret(secret)
@@ -28,8 +31,29 @@ internal class MdmCredentialStore(context: Context) {
     fun fingerprint(): String = MdmCrypto.fingerprint(getOrCreateSecret())
 
     @Synchronized
-    fun requireExistingSecret(): String = readSecret()
-        ?: throw IllegalStateException("MDM credential is not enrolled yet")
+    fun requireExistingSecret(): String {
+        ensureDeviceBinding()
+        return readSecret() ?: throw IllegalStateException("MDM credential is not enrolled yet")
+    }
+
+    private fun ensureDeviceBinding() {
+        val currentDeviceId = Settings.Secure.getString(
+            appContext.contentResolver,
+            Settings.Secure.ANDROID_ID
+        ).orEmpty()
+        val boundDeviceId = preferences.getString(KEY_DEVICE_ID, null)
+        val containsCredential = preferences.contains(KEY_CIPHERTEXT) || preferences.contains(KEY_IV)
+        val reset = MdmDeviceBindingPolicy.mustReset(boundDeviceId, currentDeviceId, containsCredential)
+        if (reset) {
+            check(preferences.edit().clear().putString(KEY_DEVICE_ID, currentDeviceId).commit()) {
+                "MDM credential binding could not be reset safely"
+            }
+        } else if (boundDeviceId != currentDeviceId) {
+            check(preferences.edit().putString(KEY_DEVICE_ID, currentDeviceId).commit()) {
+                "MDM credential binding could not be persisted"
+            }
+        }
+    }
 
     private fun readSecret(): String? {
         val encrypted = preferences.getString(KEY_CIPHERTEXT, null) ?: return null
@@ -84,6 +108,7 @@ internal class MdmCredentialStore(context: Context) {
         const val PREFERENCES = "MdmSecureCredentials"
         const val KEY_CIPHERTEXT = "device_secret_ciphertext_v1"
         const val KEY_IV = "device_secret_iv_v1"
+        const val KEY_DEVICE_ID = "bound_device_id_v1"
         const val KEY_ALIAS = "com.grupotgt.launcherkioscotgt.mdm.credentials.v1"
         const val ANDROID_KEY_STORE = "AndroidKeyStore"
         const val TRANSFORMATION = "AES/GCM/NoPadding"

@@ -1241,9 +1241,7 @@ class MainActivity : AppCompatActivity() {
 
             procesarIntentMantenimiento(intent)
 
-            if (!MaintenanceModeManager.estaActivo(this) && !ManagedModeStore.isManagedFree(this)) {
-                entrarEnKioscoSiPermitido("onCreate")
-            } else if (ManagedModeStore.isManagedFree(this)) {
+            if (!MaintenanceModeManager.estaActivo(this)) {
                 handler.post { reconciliarModoGestionado("onCreate") }
             } else {
                 AppLog.info("IT MANTENIMIENTO -> no se activa LockTask en onCreate.")
@@ -3163,11 +3161,8 @@ class MainActivity : AppCompatActivity() {
         if (MaintenanceModeManager.estaActivo(this)) {
             MaintenanceModeManager.reprogramarSiActivo(this)
             AppLog.info("IT MANTENIMIENTO -> onResume sin reactivar kiosco (${MaintenanceModeManager.descripcion(this)}).")
-        } else if (ManagedModeStore.isManagedFree(this)) {
-            reconciliarModoGestionado("onResume")
         } else {
-            configurarModoKioscoEstricto()
-            entrarEnKioscoSiPermitido("onResume")
+            reconciliarModoGestionado("onResume")
         }
 
         // onCreate ya carga caché y lanza la primera sincronización. Evitamos repetir todo

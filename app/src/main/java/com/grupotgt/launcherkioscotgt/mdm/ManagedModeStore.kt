@@ -1,6 +1,7 @@
 package com.grupotgt.launcherkioscotgt.mdm
 
 import android.content.Context
+import android.provider.Settings
 
 internal enum class ManagedMode(val wireValue: String) {
     BLINDADO("BLINDADO"),
@@ -96,8 +97,28 @@ internal object ManagedModeStore {
             .commit()
     }
 
-    private fun preferences(context: Context) = context.applicationContext
-        .getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
+    @Synchronized
+    private fun preferences(context: Context): android.content.SharedPreferences {
+        val app = context.applicationContext
+        val prefs = app.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
+        val currentDeviceId = Settings.Secure.getString(
+            app.contentResolver,
+            Settings.Secure.ANDROID_ID
+        ).orEmpty()
+        val boundDeviceId = prefs.getString(KEY_DEVICE_ID, null)
+        val containsState = prefs.contains(KEY_DESIRED_MODE) || prefs.contains(KEY_APPLIED_MODE)
+        val reset = MdmDeviceBindingPolicy.mustReset(boundDeviceId, currentDeviceId, containsState)
+        if (reset) {
+            check(prefs.edit().clear().putString(KEY_DEVICE_ID, currentDeviceId).commit()) {
+                "Managed mode binding could not be reset safely"
+            }
+        } else if (boundDeviceId != currentDeviceId) {
+            check(prefs.edit().putString(KEY_DEVICE_ID, currentDeviceId).commit()) {
+                "Managed mode binding could not be persisted"
+            }
+        }
+        return prefs
+    }
 
     private const val PREFERENCES = "MdmManagedModeState"
     private const val KEY_DESIRED_MODE = "desired_mode"
@@ -106,6 +127,7 @@ internal object ManagedModeStore {
     private const val KEY_APPLIED_REVISION = "applied_revision"
     private const val KEY_PHASE = "phase"
     private const val KEY_LAST_ERROR = "last_error"
+    private const val KEY_DEVICE_ID = "bound_device_id_v1"
     private const val PHASE_PENDING = "PENDING"
     private const val PHASE_STABLE = "STABLE"
     private const val PHASE_ERROR = "ERROR"

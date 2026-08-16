@@ -39,6 +39,14 @@ class MdmPolicyTest {
     }
 
     @Test
+    fun restoredManagedStateIsRejectedWhenDeviceBindingIsMissingOrDifferent() {
+        assertFalse(MdmDeviceBindingPolicy.mustReset(null, "device-a", false))
+        assertTrue(MdmDeviceBindingPolicy.mustReset(null, "device-a", true))
+        assertFalse(MdmDeviceBindingPolicy.mustReset("device-a", "device-a", true))
+        assertTrue(MdmDeviceBindingPolicy.mustReset("device-a", "device-b", true))
+    }
+
+    @Test
     fun transportRejectsEmpty4xxAndRetriesTimeoutAnd5xx() {
         assertThrows<IllegalStateException> { MdmTransportPolicy.validatedBody(200, true, "", 100) }
         assertThrows<IllegalStateException> { MdmTransportPolicy.validatedBody(404, false, "x", 100) }
