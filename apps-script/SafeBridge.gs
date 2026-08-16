@@ -11,7 +11,12 @@ const MDM = Object.freeze({
     terminals: '1_TERMINALES',
     devices: '_SB_DEVICES',
     nonces: '_SB_NONCES',
-    audit: '_SB_AUDIT'
+    audit: '_SB_AUDIT',
+    contacts: '2_AGENDA',
+    contactProfiles: '_MDM_CONTACT_PROFILE',
+    apps: '3_APLICACIONES',
+    appProfiles: '_MDM_APP_PROFILE',
+    config: '_MDM_CONFIG_DESIRED'
   })
 });
 
@@ -77,6 +82,9 @@ function enroll_(request) {
       mode: registration.approvalState === 'APPROVED' ? safeMode_(registration.mode) : 'BLINDADO',
       mode_revision: registration.modeRevision
     };
+    if (registration.approvalState === 'APPROVED' && registration.commandsEnabled) {
+      data.config_snapshot = buildConfigSnapshot_(request.device_id, registration);
+    }
     audit_('INFO', 'ENROLL_OK', request.device_id + ' state=' + registration.approvalState);
     return signedResponse_(request.device_id, request.nonce, data, proposedSecret);
   } finally {
@@ -235,10 +243,108 @@ function upsertPendingRegistration_(deviceId, payload, fingerprint) {
     approvalState: currentAuth,
     commandsEnabled: commandsEnabled,
     terminal: String(terminals.getRange(row, 2).getValue()),
+    section: String(terminals.getRange(row, 3).getValue()),
     profileId: String(terminals.getRange(row, 4).getValue() || 'PENDIENTE_SEGURO'),
     mode: String(terminals.getRange(row, 5).getValue() || 'BLINDADO'),
-    modeRevision: Math.max(0, Number(devices.getRange(deviceRow, 36).getValue()) || 0)
+    modeRevision: Math.max(0, Number(devices.getRange(deviceRow, 36).getValue()) || 0),
+    configRevision: Math.max(0, Number(devices.getRange(deviceRow, 37).getValue()) || 0),
+    deviceRow: deviceRow
   };
+}
+
+function buildConfigSnapshot_(deviceId, registration) {
+  const contactRows = sheet_(MDM.sheets.contacts).getDataRange().getValues().slice(5);
+  const contactsById = {};
+  contactRows.forEach(function (row) {
+    const id = String(row[0] || '').trim();
+    const phone = String(row[2] || '').replace(/[^0-9]/g, '');
+    if (id && phone && String(row[4] || '').toUpperCase() === 'ACTIVO') {
+      contactsById[id] = { contact_id: id, name: String(row[1] || '').trim(), phone: phone };
+    }
+  });
+
+  const contacts = [];
+  const seenPhones = {};
+  sheet_(MDM.sheets.contactProfiles).getDataRange().getValues().slice(1).forEach(function (row) {
+    if (String(row[0]) !== registration.profileId || row[2] !== true) return;
+    const contact = contactsById[String(row[1])];
+    if (!contact || seenPhones[contact.phone]) return;
+    seenPhones[contact.phone] = true;
+    contacts.push({
+      contact_id: contact.contact_id,
+      name: contact.name,
+      phone: contact.phone,
+      can_call_terminal: row[3] === true,
+      terminal_can_call: row[4] === true
+    });
+  });
+
+  const appRows = sheet_(MDM.sheets.apps).getDataRange().getValues().slice(4);
+  const appsById = {};
+  appRows.forEach(function (row) {
+    const id = String(row[0] || '').trim();
+    const packageName = String(row[2] || '').trim();
+    if (id && packageName && String(row[4] || '').toUpperCase() === 'ACTIVO') {
+      appsById[id] = {
+        app_id: id,
+        label: String(row[1] || '').trim(),
+        package_name: packageName,
+        order: Math.max(0, Number(row[5]) || 0)
+      };
+    }
+  });
+
+  const apps = [];
+  const seenPackages = {};
+  sheet_(MDM.sheets.appProfiles).getDataRange().getValues().slice(1).forEach(function (row) {
+    if (String(row[0]) !== registration.profileId || row[2] !== true) return;
+    const app = appsById[String(row[1])];
+    if (!app || seenPackages[app.package_name]) return;
+    seenPackages[app.package_name] = true;
+    apps.push(app);
+  });
+  apps.sort(function (a, b) { return a.order - b.order || a.package_name.localeCompare(b.package_name); });
+
+  const settings = {};
+  const priorities = {};
+  sheet_(MDM.sheets.config).getDataRange().getValues().slice(1).forEach(function (row) {
+    const scope = String(row[1] || '').trim().toUpperCase();
+    const target = String(row[2] || '').trim();
+    const key = String(row[3] || '').trim().toUpperCase();
+    if (!key || key === 'PANEL_IT_PASSWORD') return;
+    let priority = 0;
+    if (scope === 'GLOBAL' && target === 'GLOBAL') priority = 1;
+    if (scope === 'PERFIL' && target === registration.profileId) priority = 2;
+    if (scope === 'TERMINAL' && target === deviceId) priority = 3;
+    if (priority && priority >= (priorities[key] || 0)) {
+      settings[key] = String(row[4] === null || row[4] === undefined ? '' : row[4]);
+      priorities[key] = priority;
+    }
+  });
+
+  const snapshot = {
+    schema_version: 1,
+    complete: true,
+    device_id: deviceId,
+    revision: 0,
+    profile_id: registration.profileId,
+    terminal: registration.terminal,
+    section: registration.section,
+    contacts: contacts,
+    apps: apps,
+    settings: settings
+  };
+  const snapshotHash = sha256Hex_(canonicalJson_(snapshot));
+  const devices = sheet_(MDM.sheets.devices);
+  const previousHash = String(devices.getRange(registration.deviceRow, 18).getValue() || '');
+  let revision = registration.configRevision;
+  if (!constantTimeEquals_(previousHash, snapshotHash)) {
+    revision += 1;
+    devices.getRange(registration.deviceRow, 18).setValue(snapshotHash);
+    devices.getRange(registration.deviceRow, 37).setValue(revision);
+  }
+  snapshot.revision = revision;
+  return snapshot;
 }
 
 function ensureDeviceColumns_(sheet) {

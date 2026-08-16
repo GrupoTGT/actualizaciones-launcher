@@ -4,7 +4,7 @@
 
 - Apps Script project: `1qv79yC0SqqdzguF0IOgym_wK8kCBM_-tdUFCn2ecXrNLDpZ6MlRifEc0`
 - Web App deployment: `AKfycby2-olpj2Y9wryLca77Jd5a01nROHf8C2XvyfU_wlk94DlAjR9mGE81uTwCPLj-x0E5`
-- Active deployment version: `4`.
+- Active deployment version: `5`.
 - Endpoint: `https://script.google.com/macros/s/AKfycby2-olpj2Y9wryLca77Jd5a01nROHf8C2XvyfU_wlk94DlAjR9mGE81uTwCPLj-x0E5/exec`
 - Execution identity: deploying operator.
 - Access: public endpoint; application-level access is restricted by the signed
@@ -66,3 +66,15 @@ unknown mode values resolve to `BLINDADO`.
 - Missing, empty or unknown mode means `BLINDADO`.
 - Pending devices receive `PENDIENTE_SEGURO` and commands disabled.
 - Enrollment never publishes OTA metadata and never touches Device Owner.
+
+## Signed offline snapshot
+
+Approved devices with commands enabled receive a signed `config_snapshot` built
+from the canonical contact, profile-contact, app, profile-app and desired config
+tables. The snapshot includes the bound device ID, profile, terminal, section,
+contacts, call directions, permitted apps, inherited settings and a monotonic
+content revision. The Panel IT password is explicitly excluded.
+
+Android validates structure, identity, uniqueness, package names, phone numbers,
+revision and SHA-256 before an atomic commit. Empty, corrupt, unsigned, stale or
+same-revision/different-content responses leave the last valid snapshot intact.

@@ -60,6 +60,8 @@ import androidx.core.widget.TextViewCompat
 import com.grupotgt.launcherkioscotgt.mdm.InternalCommandGate
 import com.grupotgt.launcherkioscotgt.mdm.ManagedMode
 import com.grupotgt.launcherkioscotgt.mdm.ManagedModeStore
+import com.grupotgt.launcherkioscotgt.mdm.MdmConfigCache
+import com.grupotgt.launcherkioscotgt.mdm.MdmConfigSnapshot
 import com.grupotgt.launcherkioscotgt.mdm.MdmEnrollmentCoordinator
 import okhttp3.Call
 import okhttp3.Callback
@@ -1011,6 +1013,7 @@ class MainActivity : AppCompatActivity() {
 
     private var contactosGuardados = listOf<Pair<String, String>>()
     private var whitelistGlobal = listOf<String>()
+    @Volatile private var usandoConfigCanonica = false
 
     private var handlerInactividad = Handler(Looper.getMainLooper())
     private var minutosInactividadConfig = 10
@@ -1289,6 +1292,8 @@ class MainActivity : AppCompatActivity() {
                                 "MDM MODO -> orden rechazada por revisión obsoleta o contradictoria."
                             )
                         }
+                        MdmConfigCache(this).load()
+                            .onSuccess(::aplicarConfigCanonica)
                     }
                 }
             }
@@ -1806,6 +1811,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun cargarAgendaDesdeCache() {
         try {
+            MdmConfigCache(this).load().onSuccess { snapshot ->
+                aplicarConfigCanonica(snapshot)
+                return
+            }
             val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
             val csvCache = prefs.getString("csv_cache_data", "") ?: ""
             if (csvCache.isNotEmpty()) {
@@ -1818,7 +1827,53 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun aplicarConfigCanonica(snapshot: MdmConfigSnapshot) {
+        usandoConfigCanonica = true
+        val contactos = snapshot.contacts
+            .filter { it.terminalCanCall }
+            .map { it.name to it.phone }
+        val whitelist = snapshot.contacts
+            .filter { it.canCallTerminal }
+            .map { it.phone }
+            .distinct()
+        val apps = snapshot.apps.map { it.packageName }.distinct()
+        val settingsJson = JSONObject(snapshot.settings).toString()
+        val persisted = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE).edit()
+            .putString("ubicacion_dispositivo", snapshot.section)
+            .putString("mdm_terminal_nombre", snapshot.terminal)
+            .putString("mdm_profile_id", snapshot.profileId)
+            .putString("apps_permitidas", apps.joinToString(","))
+            .putString("mdm_config_canonica", settingsJson)
+            .putLong("mdm_config_revision", snapshot.revision)
+            .putString(
+                "ultima_sincro",
+                SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault()).format(Date())
+            )
+            .commit()
+        if (!persisted) {
+            AppLog.error("MDM CACHE -> no se pudo proyectar el snapshot en la configuración local.")
+            return
+        }
+
+        contactosGuardados = contactos
+        whitelistGlobal = whitelist
+        runOnUiThread {
+            cargarIdentificacionYLogo()
+            configurarModoKioscoEstricto()
+            construirPanelDesdeNube(contactos, apps)
+            actualizarTextoUltimaSincro()
+        }
+        AppLog.success(
+            "MDM CACHE -> configuración canónica aplicada rev=${snapshot.revision}; " +
+                "perfil=${snapshot.profileId}; contactos=${contactos.size}; apps=${apps.size}"
+        )
+    }
+
     private fun descargarAgendaNube(modoSilencioso: Boolean) {
+        if (usandoConfigCanonica) {
+            AppLog.info("MDM LEGACY -> descarga CSV omitida; snapshot canónico activo.")
+            return
+        }
         val client = OkHttpClient()
         val urlCsvSinCache = "$URL_GOOGLE_SHEETS_CSV&t=${System.currentTimeMillis()}"
         val request = Request.Builder().url(urlCsvSinCache).build()
@@ -1836,6 +1891,10 @@ class MainActivity : AppCompatActivity() {
 
             override fun onResponse(call: Call, response: Response) {
                 val csvData = response.body?.string()
+                if (usandoConfigCanonica) {
+                    AppLog.info("MDM LEGACY -> respuesta CSV descartada; snapshot canónico ya activo.")
+                    return
+                }
                 if (!response.isSuccessful || csvData.isNullOrEmpty()) {
                     AppLog.error("CSV inválido/no disponible. HTTP=${response.code} vacío=${csvData.isNullOrEmpty()}")
                     enviarTelemetriaMDM()
@@ -1848,7 +1907,7 @@ class MainActivity : AppCompatActivity() {
                 } catch (e: Exception) {}
 
                 runOnUiThread {
-                    procesarYConstruirCSV(csvData, ejecutarAccionesRemotas = true)
+                    procesarYConstruirCSV(csvData, ejecutarAccionesRemotas = false)
                     actualizarTextoUltimaSincro()
 
                     // DPM/AudioManager ya han recibido las órdenes. Damos un pequeño margen para
@@ -1863,7 +1922,7 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
-    private fun procesarYConstruirCSV(csvData: String, ejecutarAccionesRemotas: Boolean = true) {
+    private fun procesarYConstruirCSV(csvData: String, ejecutarAccionesRemotas: Boolean = false) {
         try {
             val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
             val grupoFiltro = prefs.getString("ubicacion_dispositivo", "Seccion Finales linea 4") ?: "Seccion Finales linea 4"
@@ -1903,7 +1962,7 @@ class MainActivity : AppCompatActivity() {
                     val nombreExcel = partes[1].trim().replace("\"", "")
                     val telefonoExcel = partes[2].trim().replace("\"", "")
 
-                    if (partes.size >= 5) {
+                    if (ejecutarAccionesRemotas && partes.size >= 5) {
                         val telefonoITGlobal = partes[3].trim().replace("\"", "")
                         val pinITGlobal = partes[4].trim().replace("\"", "")
                         prefs.edit().apply {
@@ -1912,7 +1971,7 @@ class MainActivity : AppCompatActivity() {
                         }.apply()
                     }
 
-                    if (partes.size >= 8) {
+                    if (ejecutarAccionesRemotas && partes.size >= 8) {
                         val correoITGlobal = partes[7].trim().replace("\"", "")
                         if (correoITGlobal.isNotEmpty() && correoITGlobal.contains("@")) {
                             prefs.edit().putString("correo_it", correoITGlobal).apply()
@@ -1926,7 +1985,7 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
 
-                    if (partes.size >= 10) {
+                    if (ejecutarAccionesRemotas && partes.size >= 10) {
                         val minutosExcel = partes[9].trim().replace("\"", "").toIntOrNull()
                         if (minutosExcel != null && minutosExcel > 0) {
                             minutosInactividadConfig = minutosExcel
@@ -1998,7 +2057,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-            if (horaReinicioEncontrada.isNotEmpty()) {
+            if (ejecutarAccionesRemotas && horaReinicioEncontrada.isNotEmpty()) {
                 prefs.edit().putString("hora_reinicio_seccion", horaReinicioEncontrada).apply()
             }
             val appsFinales = listaAppsPermitidas.distinct()
@@ -2012,17 +2071,16 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread {
                 configurarModoKioscoEstricto()
                 construirPanelDesdeNube(nuevosBotones, appsFinales)
-                actualizarBannerUrgencia(avisoEncontrado)
-
-                if (volumenCmd != null) aplicarVolumenRemoto(volumenCmd!!)
-                if (brilloCmd != null) aplicarBrilloRemoto(brilloCmd!!)
-                if (timeoutCmd.isNotEmpty() && timeoutCmd != ultimoTimeoutEjecutado) {
-                    aplicarTimeoutPantalla(timeoutCmd)
-                    ultimoTimeoutEjecutado = timeoutCmd
-                    prefs.edit().putString("mdm_ultimo_timeout", timeoutCmd).apply()
-                }
 
                 if (ejecutarAccionesRemotas) {
+                    actualizarBannerUrgencia(avisoEncontrado)
+                    if (volumenCmd != null) aplicarVolumenRemoto(volumenCmd!!)
+                    if (brilloCmd != null) aplicarBrilloRemoto(brilloCmd!!)
+                    if (timeoutCmd.isNotEmpty() && timeoutCmd != ultimoTimeoutEjecutado) {
+                        aplicarTimeoutPantalla(timeoutCmd)
+                        ultimoTimeoutEjecutado = timeoutCmd
+                        prefs.edit().putString("mdm_ultimo_timeout", timeoutCmd).apply()
+                    }
                     // FIX1.1: los comandos de estado (ROBADA/BLOQUEO/DESBLOQUEAR) son idempotentes.
                     // No se pueden tratar igual que REINICIAR/ALARMA, porque si el primer DESBLOQUEAR
                     // no llega a cerrar la UI por cualquier recreación/race, bloquearlo por "último comando"

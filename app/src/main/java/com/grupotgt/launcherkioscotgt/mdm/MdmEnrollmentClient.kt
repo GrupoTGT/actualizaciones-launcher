@@ -17,7 +17,8 @@ internal data class MdmEnrollmentResult(
     val terminal: String,
     val profileId: String,
     val mode: String,
-    val modeRevision: Long
+    val modeRevision: Long,
+    val configSnapshot: JSONObject?
 )
 
 internal class MdmEnrollmentClient(
@@ -123,7 +124,8 @@ internal class MdmEnrollmentClient(
             terminal = data.optString("terminal"),
             profileId = data.optString("profile_id", "PENDIENTE_SEGURO"),
             mode = mode,
-            modeRevision = data.optLong("mode_revision", 0L).coerceAtLeast(0L)
+            modeRevision = data.optLong("mode_revision", 0L).coerceAtLeast(0L),
+            configSnapshot = data.optJSONObject("config_snapshot")
         )
     }
 

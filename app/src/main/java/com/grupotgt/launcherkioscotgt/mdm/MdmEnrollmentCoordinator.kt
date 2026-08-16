@@ -51,6 +51,18 @@ internal object MdmEnrollmentCoordinator {
                         "MDM SAFE BRIDGE -> autoalta ${enrollment.approvalState}; " +
                             "huella=${enrollment.credentialFingerprint}; comandos=${enrollment.commandsEnabled}"
                     )
+                    enrollment.configSnapshot?.let { snapshot ->
+                        MdmConfigCache(appContext).update(deviceId, snapshot)
+                            .onSuccess { valid ->
+                                AppLog.info(
+                                    "MDM CACHE -> snapshot válido rev=${valid.revision}; " +
+                                        "contactos=${valid.contacts.size}; apps=${valid.apps.size}"
+                                )
+                            }
+                            .onFailure { error ->
+                                AppLog.error("MDM CACHE -> snapshot rechazado: ${error.message}")
+                            }
+                    }
                     onAuthenticatedEnrollment?.invoke(enrollment)
                 }.onFailure { error ->
                     AppLog.error("MDM SAFE BRIDGE -> autoalta no confirmada: ${error.message}")
