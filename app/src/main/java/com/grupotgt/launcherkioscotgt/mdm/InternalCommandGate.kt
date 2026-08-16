@@ -6,6 +6,7 @@ internal object InternalCommandGate {
     const val ACTION_START_MAINTENANCE = "START_MAINTENANCE"
     const val ACTION_FINISH_MAINTENANCE = "FINISH_MAINTENANCE"
     const val ACTION_FORCE_OTA = "FORCE_OTA"
+    const val ACTION_RECONCILE_MANAGED_MODE = "RECONCILE_MANAGED_MODE"
 
     @Synchronized
     fun issue(context: Context, action: String): String {
@@ -44,7 +45,8 @@ internal object InternalCommandGate {
     private val ALLOWED_ACTIONS = setOf(
         ACTION_START_MAINTENANCE,
         ACTION_FINISH_MAINTENANCE,
-        ACTION_FORCE_OTA
+        ACTION_FORCE_OTA,
+        ACTION_RECONCILE_MANAGED_MODE
     )
 
     private const val PREFERENCES = "MdmInternalCommandGate"

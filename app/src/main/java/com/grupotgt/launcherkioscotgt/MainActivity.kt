@@ -996,6 +996,8 @@ class MainActivity : AppCompatActivity() {
         const val EXTRA_ABRIR_AJUSTES = "com.grupotgt.launcherkioscotgt.EXTRA_ABRIR_AJUSTES"
         const val EXTRA_FINALIZAR_MANTENIMIENTO = "com.grupotgt.launcherkioscotgt.EXTRA_FINALIZAR_MANTENIMIENTO"
         const val EXTRA_INTERNAL_COMMAND_TOKEN = "com.grupotgt.launcherkioscotgt.EXTRA_INTERNAL_COMMAND_TOKEN"
+        const val EXTRA_RECONCILE_MANAGED_MODE = "com.grupotgt.launcherkioscotgt.EXTRA_RECONCILE_MANAGED_MODE"
+        const val ACTION_RECONCILE_MANAGED_MODE = "com.grupotgt.launcherkioscotgt.action.RECONCILE_MANAGED_MODE"
     }
 
     private val URL_GOOGLE_SHEETS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSye0TO9CYH8xXSPy-rCNDOO4UjiNdmp32SiOWLwxsUPI25ZW9rHW44JlAPn38_4vVpJK5Pw6tu5Ct0/pub?output=csv"
@@ -1356,6 +1358,18 @@ class MainActivity : AppCompatActivity() {
         setIntent(intent)
 
         if (procesarIntentMantenimiento(intent)) return
+
+        if (intent.action == ACTION_RECONCILE_MANAGED_MODE) {
+            if (!consumirComandoInterno(
+                    intent,
+                    EXTRA_RECONCILE_MANAGED_MODE,
+                    InternalCommandGate.ACTION_RECONCILE_MANAGED_MODE
+                )
+            ) return
+            reconciliarModoGestionado("heartbeat firmado")
+            MdmConfigCache(this).load().onSuccess(::aplicarConfigCanonica)
+            return
+        }
 
         if (consumirComandoInterno(
                 intent,

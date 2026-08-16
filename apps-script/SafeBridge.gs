@@ -3,7 +3,7 @@
 const MDM = Object.freeze({
   spreadsheetId: '1MhpLIjGF2ZOliUO_Bske_oZ8Zcq-2rTLNiI3rSIj1nw',
   contractVersion: 1,
-  serviceVersion: '3.0.0-cutover',
+  serviceVersion: '3.1.0-mode-ack',
   maxClockSkewMs: 5 * 60 * 1000,
   nonceRetentionMs: 24 * 60 * 60 * 1000,
   secretPrefix: 'DEVICE_SECRET_',
@@ -13,6 +13,8 @@ const MDM = Object.freeze({
     nonces: '_SB_NONCES',
     audit: '_SB_AUDIT',
     telemetry: '_SB_TELEMETRY',
+    commands: '_SB_COMMANDS',
+    acks: '_SB_ACKS',
     contacts: '2_AGENDA',
     contactProfiles: '_MDM_CONTACT_PROFILE',
     apps: '3_APLICACIONES',
@@ -67,6 +69,13 @@ function telemetry_(request) {
     const terminalRow = findRow_(terminal, 1, request.device_id, 5);
     const payload = normalizedTelemetry_(request.payload);
     const now = new Date();
+    const approvalState = String(devices.getRange(deviceRow, 31).getValue() || 'PENDING_APPROVAL');
+    const commandsEnabled = approvalState === 'APPROVED' && devices.getRange(deviceRow, 33).getValue() === true;
+    devices.getRange(deviceRow, 35).setValue(payload.applied_mode);
+    acknowledgeAppliedMode_(request.device_id, payload, now);
+    const directive = commandsEnabled && terminalRow
+      ? resolveManagedDirective_(request.device_id, devices, deviceRow, terminal, terminalRow, now)
+      : { mode: 'BLINDADO', revision: 0, commandId: '' };
 
     devices.getRange(deviceRow, 7).setValue(now);
     devices.getRange(deviceRow, 8).setValue(payload.app_version);
@@ -87,16 +96,38 @@ function telemetry_(request) {
     devices.getRange(deviceRow, 27).setValue(now);
     devices.getRange(deviceRow, 28).setValue(payload.vowifi_state);
     devices.getRange(deviceRow, 29).setValue(now);
-    devices.getRange(deviceRow, 35).setValue(payload.applied_mode);
     devices.getRange(deviceRow, 38).setValue(payload.last_error === 'SIN ERROR' ? '' : payload.last_error);
 
-    if (terminalRow) updateTerminalTelemetry_(terminal, terminalRow, payload, now);
+    if (terminalRow) {
+      updateTerminalTelemetry_(
+        terminal,
+        terminalRow,
+        payload,
+        now,
+        directive.commandId ? 'PENDIENTE ' + directive.commandId : 'SIN ORDEN PENDIENTE'
+      );
+    }
     appendTelemetry_(request.device_id, payload, now);
     audit_('INFO', 'TELEMETRY_OK', request.device_id);
-    return signedResponse_(request.device_id, request.nonce, {
+    const data = {
       telemetry_accepted: true,
-      received_at_ms: now.getTime()
-    }, secret);
+      received_at_ms: now.getTime(),
+      approval_state: approvalState,
+      commands_enabled: commandsEnabled,
+      mode: directive.mode,
+      mode_revision: directive.revision,
+      command_id: directive.commandId
+    };
+    if (commandsEnabled && terminalRow) {
+      data.config_snapshot = buildConfigSnapshot_(request.device_id, {
+        terminal: String(terminal.getRange(terminalRow, 2).getValue()),
+        section: String(terminal.getRange(terminalRow, 3).getValue()),
+        profileId: String(terminal.getRange(terminalRow, 4).getValue() || 'PENDIENTE_SEGURO'),
+        configRevision: Math.max(0, Number(devices.getRange(deviceRow, 37).getValue()) || 0),
+        deviceRow: deviceRow
+      });
+    }
+    return signedResponse_(request.device_id, request.nonce, data, secret);
   } finally {
     lock.releaseLock();
   }
@@ -125,9 +156,9 @@ function normalizedTelemetry_(payload) {
     storage_available_bytes: safeNonNegativeNumber_(payload.storage_available_bytes),
     storage_total_bytes: safeNonNegativeNumber_(payload.storage_total_bytes),
     desired_mode: safeMode_(payload.desired_mode),
-    desired_mode_revision: safeNonNegativeNumber_(payload.desired_mode_revision),
+    desired_mode_revision: safeRevision_(payload.desired_mode_revision),
     applied_mode: safeMode_(payload.applied_mode),
-    applied_mode_revision: safeNonNegativeNumber_(payload.applied_mode_revision),
+    applied_mode_revision: safeRevision_(payload.applied_mode_revision),
     transition_phase: safeCellText_(payload.transition_phase, 'NO DISPONIBLE', 60),
     last_error: safeCellText_(payload.last_error, 'SIN ERROR', 240),
     agenda_status: safeCellText_(payload.agenda_status, 'NO DISPONIBLE', 60),
@@ -139,7 +170,104 @@ function normalizedTelemetry_(payload) {
   };
 }
 
-function updateTerminalTelemetry_(sheet, row, payload, now) {
+function resolveManagedDirective_(deviceId, devices, deviceRow, terminals, terminalRow, now) {
+  const requestedMode = safeMode_(terminals.getRange(terminalRow, 5).getValue());
+  const storedMode = safeMode_(devices.getRange(deviceRow, 34).getValue());
+  let revision = Math.max(0, Number(devices.getRange(deviceRow, 36).getValue()) || 0);
+  let commandId = findPendingModeCommand_(deviceId, revision);
+  if (requestedMode !== storedMode) {
+    revision += 1;
+    commandId = deviceId + '-MODE-' + revision;
+    devices.getRange(deviceRow, 34).setValue(requestedMode);
+    devices.getRange(deviceRow, 36).setValue(revision);
+    enqueueModeCommand_(commandId, deviceId, revision, requestedMode, now);
+    audit_('INFO', 'MODE_COMMAND_CREATED', deviceId + ' rev=' + revision + ' mode=' + requestedMode);
+  } else if (!commandId && safeMode_(devices.getRange(deviceRow, 35).getValue()) !== requestedMode) {
+    revision += 1;
+    commandId = deviceId + '-MODE-' + revision;
+    devices.getRange(deviceRow, 36).setValue(revision);
+    enqueueModeCommand_(commandId, deviceId, revision, requestedMode, now);
+    audit_('INFO', 'MODE_COMMAND_REISSUED', deviceId + ' rev=' + revision + ' mode=' + requestedMode);
+  }
+  return { mode: requestedMode, revision: revision, commandId: commandId };
+}
+
+function enqueueModeCommand_(commandId, deviceId, revision, mode, now) {
+  const sheet = sheet_(MDM.sheets.commands);
+  const headers = [
+    'command_id', 'device_id', 'revision', 'issued_at', 'expires_at', 'action',
+    'desired_mode', 'status', 'ack_at', 'applied_mode', 'applied_revision', 'error'
+  ];
+  ensureHeader_(sheet, headers);
+  if (findRow_(sheet, 1, commandId, 2)) return;
+  sheet.appendRow([
+    commandId, deviceId, revision, now, new Date(now.getTime() + 24 * 60 * 60 * 1000),
+    'SET_MANAGED_MODE', mode, 'PENDING_ACK', '', '', '', ''
+  ]);
+}
+
+function findPendingModeCommand_(deviceId, revision) {
+  const sheet = sheet_(MDM.sheets.commands);
+  ensureHeader_(sheet, [
+    'command_id', 'device_id', 'revision', 'issued_at', 'expires_at', 'action',
+    'desired_mode', 'status', 'ack_at', 'applied_mode', 'applied_revision', 'error'
+  ]);
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return '';
+  const rows = sheet.getRange(2, 1, lastRow - 1, 12).getValues();
+  for (let i = rows.length - 1; i >= 0; i -= 1) {
+    if (String(rows[i][1]) !== deviceId || Number(rows[i][2]) !== revision ||
+        String(rows[i][7]) !== 'PENDING_ACK') continue;
+    const expiresAt = rows[i][4] instanceof Date ? rows[i][4].getTime() : new Date(rows[i][4]).getTime();
+    if (Number.isFinite(expiresAt) && expiresAt < Date.now()) {
+      sheet.getRange(i + 2, 8).setValue('EXPIRED');
+      continue;
+    }
+    return String(rows[i][0]);
+  }
+  return '';
+}
+
+function acknowledgeAppliedMode_(deviceId, payload, now) {
+  if (payload.applied_mode_revision < 0) return;
+  const sheet = sheet_(MDM.sheets.commands);
+  ensureHeader_(sheet, [
+    'command_id', 'device_id', 'revision', 'issued_at', 'expires_at', 'action',
+    'desired_mode', 'status', 'ack_at', 'applied_mode', 'applied_revision', 'error'
+  ]);
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return;
+  const rows = sheet.getRange(2, 1, lastRow - 1, 12).getValues();
+  for (let i = rows.length - 1; i >= 0; i -= 1) {
+    const row = rows[i];
+    if (String(row[1]) !== deviceId || Number(row[2]) !== payload.applied_mode_revision ||
+        String(row[7]) !== 'PENDING_ACK') continue;
+    const commandRow = i + 2;
+    const expectedMode = safeMode_(row[6]);
+    if (expectedMode !== payload.applied_mode) return;
+    sheet.getRange(commandRow, 8, 1, 4).setValues([[
+      'ACK_APPLIED', now, payload.applied_mode, payload.applied_mode_revision
+    ]]);
+    appendModeAck_(String(row[0]), deviceId, payload, now);
+    audit_('INFO', 'MODE_COMMAND_ACK', deviceId + ' rev=' + payload.applied_mode_revision);
+    return;
+  }
+}
+
+function appendModeAck_(commandId, deviceId, payload, now) {
+  const sheet = sheet_(MDM.sheets.acks);
+  ensureHeader_(sheet, [
+    'ack_at', 'command_id', 'device_id', 'status', 'applied_mode',
+    'applied_revision', 'transition_phase', 'last_error'
+  ]);
+  if (findRow_(sheet, 2, commandId, 2)) return;
+  sheet.appendRow([
+    now, commandId, deviceId, 'ACK_APPLIED', payload.applied_mode,
+    payload.applied_mode_revision, payload.transition_phase, payload.last_error
+  ]);
+}
+
+function updateTerminalTelemetry_(sheet, row, payload, now, commandState) {
   sheet.getRange(row, 7, 1, 18).setValues([[
     'TELEMETRÍA REAL',
     payload.internet_validated ? 'CONECTADO' : 'SIN INTERNET VALIDADO',
@@ -157,7 +285,7 @@ function updateTerminalTelemetry_(sheet, row, payload, now) {
     payload.lock_task_state,
     payload.app_version,
     payload.last_error,
-    'SIN ACK PENDIENTE',
+    commandState,
     now
   ]]);
 }
@@ -209,12 +337,23 @@ function enroll_(request) {
     if (currentSecret && !constantTimeEquals_(currentSecret, proposedSecret)) {
       throw bridgeError_('CREDENTIAL_ALREADY_BOUND', 'A different credential is already pending or active.');
     }
-    if (!currentSecret) {
-      properties.setProperty(secretKey, proposedSecret);
-    }
-
     const fingerprint = sha256Hex_(Utilities.base64DecodeWebSafe(proposedSecret)).substring(0, 24).toUpperCase();
     const registration = upsertPendingRegistration_(request.device_id, payload, fingerprint);
+    if (registration.approvalState === 'APPROVED' && !currentSecret) {
+      properties.setProperty(secretKey, proposedSecret);
+    }
+    if (registration.approvalState === 'APPROVED' && registration.commandsEnabled) {
+      const directive = resolveManagedDirective_(
+        request.device_id,
+        sheet_(MDM.sheets.devices),
+        registration.deviceRow,
+        sheet_(MDM.sheets.terminals),
+        registration.terminalRow,
+        new Date()
+      );
+      registration.mode = directive.mode;
+      registration.modeRevision = directive.revision;
+    }
     const data = {
       approval_state: registration.approvalState,
       commands_enabled: registration.commandsEnabled,
@@ -367,6 +506,13 @@ function upsertPendingRegistration_(deviceId, payload, fingerprint) {
     devices.getRange(deviceRow, 6).setValue(new Date());
   }
   const currentAuth = String(devices.getRange(deviceRow, 31).getValue() || 'PENDING_APPROVAL');
+  const approvedFingerprint = String(devices.getRange(deviceRow, 32).getValue() || '').trim().toUpperCase();
+  if (currentAuth === 'APPROVED' && !approvedFingerprint) {
+    throw bridgeError_('APPROVAL_FINGERPRINT_REQUIRED', 'Approved devices require a verified credential fingerprint.');
+  }
+  if (currentAuth === 'APPROVED' && approvedFingerprint && approvedFingerprint !== fingerprint) {
+    throw bridgeError_('CREDENTIAL_APPROVAL_MISMATCH', 'Credential does not match the approved fingerprint.');
+  }
   const commandsEnabled = devices.getRange(deviceRow, 33).getValue() === true && currentAuth === 'APPROVED';
   devices.getRange(deviceRow, 2).setValue(terminals.getRange(row, 2).getValue());
   devices.getRange(deviceRow, 3).setValue(terminals.getRange(row, 3).getValue());
@@ -377,7 +523,9 @@ function upsertPendingRegistration_(deviceId, payload, fingerprint) {
   devices.getRange(deviceRow, 9).setValue(safeText_(payload.model, '', 80));
   devices.getRange(deviceRow, 10).setValue(safeText_(payload.android, '', 80));
   devices.getRange(deviceRow, 31).setValue(currentAuth);
-  devices.getRange(deviceRow, 32).setValue(fingerprint);
+  if (currentAuth !== 'APPROVED' || !approvedFingerprint) {
+    devices.getRange(deviceRow, 32).setValue(fingerprint);
+  }
   devices.getRange(deviceRow, 33).setValue(commandsEnabled);
   devices.getRange(deviceRow, 34).setValue(safeMode_(terminals.getRange(row, 5).getValue()));
 
@@ -390,7 +538,8 @@ function upsertPendingRegistration_(deviceId, payload, fingerprint) {
     mode: String(terminals.getRange(row, 5).getValue() || 'BLINDADO'),
     modeRevision: Math.max(0, Number(devices.getRange(deviceRow, 36).getValue()) || 0),
     configRevision: Math.max(0, Number(devices.getRange(deviceRow, 37).getValue()) || 0),
-    deviceRow: deviceRow
+    deviceRow: deviceRow,
+    terminalRow: row
   };
 }
 
@@ -582,6 +731,11 @@ function safeScalar_(value) {
 function safeNonNegativeNumber_(value) {
   const number = Number(value);
   return Number.isFinite(number) && number >= 0 ? number : 0;
+}
+
+function safeRevision_(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= -1 ? Math.floor(number) : -1;
 }
 
 function safeTextArray_(value) {

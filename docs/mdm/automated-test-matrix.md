@@ -12,10 +12,11 @@
 | BLINDADO / LIBRE GESTIONADO | `ManagedModeRevisionPolicy` tests monotonic transitions and rejects replayed or contradictory revisions. |
 | Agenda and apps without duplicates | Parser tests reject duplicate phone, contact ID, application ID or package; inventory tests deduplicate configured apps. |
 | Permitted versus installed apps | `MdmAppInventory` test keeps configured, installed-configured and missing sets separate. |
-| Command without ACK | **Partial:** bridge registration preserves `SIN ACK` and telemetry rejects a response without its ACK. A real command queue/ACK path is not implemented yet and remains a pilot blocker. |
+| Command without ACK | Bridge test creates a revisioned `PENDING_ACK` mode command and proves it becomes `ACK_APPLIED` only after matching applied mode/revision telemetry. |
 | Device Owner preservation | Automated source audit finds no owner-removal API; pre-install ADB separately verifies the actual owner. No destructive owner test is run. |
 | Airplane / Wi-Fi without Internet / recovered Internet | `MdmNetworkStateFactory` tests all three states using the same classifier as production. |
 | VoWiFi not verifiable | Network test requires the honest `NO VERIFICABLE` value. |
+| Android/Apps Script canonical parity | Both suites enforce the same Unicode/control/slash canonical JSON, SHA-256 and HMAC golden vector. |
 
 The JVM suite does not claim physical validation. JobScheduler execution, Android
 permissions, Device Owner, LockTask, HOME transitions, calls and offline behavior

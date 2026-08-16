@@ -49,6 +49,7 @@ class Sheet {
 
 const sheets = new Map([
   '1_TERMINALES', '_SB_DEVICES', '_SB_NONCES', '_SB_AUDIT', '_SB_TELEMETRY',
+  '_SB_COMMANDS', '_SB_ACKS',
   '2_AGENDA', '_MDM_CONTACT_PROFILE', '3_APLICACIONES', '_MDM_APP_PROFILE', '_MDM_CONFIG_DESIRED'
 ].map(name => [name, new Sheet(name)]));
 for (let row = 1; row <= 4; row += 1) sheets.get('1_TERMINALES').set(row, 1, row === 1 ? 'device_id' : '');
@@ -90,17 +91,26 @@ const context = vm.createContext({
 });
 vm.runInContext(fs.readFileSync(__dirname + '/SafeBridge.gs', 'utf8'), context);
 
+const goldenPayload = { z: '</tag>', a: ['ñ', true, 1], nested: { b: 'line\n', a: null } };
+const goldenCanonical = context.canonicalJson_(goldenPayload);
+assert.equal(goldenCanonical, '{"a":["ñ",true,1],"nested":{"a":null,"b":"line\\n"},"z":"</tag>"}');
+assert.equal(context.sha256Hex_(goldenCanonical), '8701f0e972647967a5bc953d769d0dc8f2d8db5a63695a77ef8b2e92c21c50b5');
+assert.equal(
+  context.Utilities.base64EncodeWebSafe(context.Utilities.computeHmacSha256Signature(goldenCanonical, 'vector-secret')),
+  'P0r25EXcCkmVL3q80ZdeCLlJVKL7N5W_ghRYAhh8BzU'
+);
+
 const secret = crypto.randomBytes(32).toString('base64url');
 let nonceCounter = 0;
-function request(deviceId, timestamp = Date.now()) {
-  const payload = { device_secret: secret, app_version: '64.0 (64)', model: 'SM-A165F', android: '14' };
+function request(deviceId, timestamp = Date.now(), requestSecret = secret) {
+  const payload = { device_secret: requestSecret, app_version: '64.0 (64)', model: 'SM-A165F', android: '14' };
   const nonce = crypto.createHash('sha256').update(String(++nonceCounter)).digest('base64url').slice(0, 32);
   const bodyHash = context.sha256Hex_(context.canonicalJson_(payload));
   const canonical = ['1', 'enroll', deviceId, String(timestamp), nonce, bodyHash].join('\n');
   return {
     contract_version: 1, action: 'enroll', device_id: deviceId, timestamp_ms: timestamp,
     nonce, payload, body_sha256: bodyHash,
-    signature: crypto.createHmac('sha256', secret).update(canonical).digest('base64url')
+    signature: crypto.createHmac('sha256', requestSecret).update(canonical).digest('base64url')
   };
 }
 
@@ -125,6 +135,45 @@ const linked = context.enroll_(request(deviceId));
 assert.equal(linked.data.approval_state, 'APPROVED');
 assert.equal(linked.data.profile_id, 'PROFILE_SALA');
 assert.equal(linked.data.commands_enabled, false);
+
+sheets.get('_SB_DEVICES').set(2, 33, true);
+sheets.get('1_TERMINALES').set(5, 5, 'LIBRE GESTIONADO');
+const directive = context.resolveManagedDirective_(
+  deviceId,
+  sheets.get('_SB_DEVICES'),
+  2,
+  sheets.get('1_TERMINALES'),
+  5,
+  new Date()
+);
+assert.equal(directive.mode, 'LIBRE GESTIONADO');
+assert.equal(directive.revision, 1);
+assert.equal(sheets.get('_SB_COMMANDS').value(2, 8), 'PENDING_ACK');
+context.acknowledgeAppliedMode_(deviceId, context.normalizedTelemetry_({
+  applied_mode: 'LIBRE GESTIONADO', applied_mode_revision: 1,
+  transition_phase: 'STABLE', last_error: 'SIN ERROR'
+}), new Date());
+assert.equal(sheets.get('_SB_COMMANDS').value(2, 8), 'ACK_APPLIED');
+assert.equal(sheets.get('_SB_ACKS').value(2, 4), 'ACK_APPLIED');
+
+const approvalGuardId = 'device-approval-guard';
+context.enroll_(request(approvalGuardId));
+const guardRow = 3;
+sheets.get('_SB_DEVICES').set(guardRow, 31, 'APPROVED');
+const approvedSecretFingerprint = context.sha256Hex_(
+  context.Utilities.base64DecodeWebSafe(secret)
+).substring(0, 24).toUpperCase();
+sheets.get('_SB_DEVICES').set(guardRow, 32, '');
+assert.throws(
+  () => context.enroll_(request(approvalGuardId)),
+  error => error.bridgeCode === 'APPROVAL_FINGERPRINT_REQUIRED'
+);
+sheets.get('_SB_DEVICES').set(guardRow, 32, approvedSecretFingerprint);
+const attackerSecret = crypto.randomBytes(32).toString('base64url');
+assert.throws(
+  () => context.enroll_(request(approvalGuardId, Date.now(), attackerSecret)),
+  error => error.bridgeCode === 'CREDENTIAL_APPROVAL_MISMATCH'
+);
 
 const invalid = request('device-invalid-1');
 invalid.signature = 'x'.repeat(64);

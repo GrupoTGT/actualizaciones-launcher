@@ -10,11 +10,27 @@ import okhttp3.Response
 import org.json.JSONObject
 import java.io.IOException
 
+internal data class MdmTelemetryResult(
+    val approvalState: String,
+    val commandsEnabled: Boolean,
+    val mode: String,
+    val modeRevision: Long,
+    val commandId: String,
+    val configSnapshot: JSONObject?
+)
+
+internal data class MdmPreparedTelemetry(
+    val call: Call,
+    val deviceId: String,
+    val requestNonce: String,
+    val secret: String
+)
+
 internal class MdmTelemetryClient(
     private val endpoint: String = MdmBridgeConfig.ENDPOINT,
     private val httpClient: OkHttpClient = OkHttpClient()
 ) {
-    fun send(deviceId: String, secret: String, payload: JSONObject, callback: (Result<Unit>) -> Unit): Call {
+    fun prepare(deviceId: String, secret: String, payload: JSONObject): MdmPreparedTelemetry {
         val nonce = MdmCrypto.newNonce()
         val timestamp = System.currentTimeMillis()
         val bodyHash = MdmCrypto.sha256Hex(MdmCanonicalJson.stringify(payload))
@@ -36,8 +52,11 @@ internal class MdmTelemetryClient(
             .post(envelope.toString().toRequestBody(JSON_MEDIA_TYPE))
             .header("Cache-Control", "no-store")
             .build()
-        return httpClient.newCall(request).also { call ->
-            call.enqueue(object : Callback {
+        return MdmPreparedTelemetry(httpClient.newCall(request), deviceId, nonce, secret)
+    }
+
+    fun enqueue(prepared: MdmPreparedTelemetry, callback: (Result<MdmTelemetryResult>) -> Unit) {
+        prepared.call.enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) = callback(Result.failure(e))
 
                 override fun onResponse(call: Call, response: Response) {
@@ -48,16 +67,20 @@ internal class MdmTelemetryClient(
                                 MdmTransportPolicy.validatedBody(
                                     response.code, response.isSuccessful, raw, MAX_RESPONSE_BYTES
                                 ),
-                                deviceId, nonce, secret
+                                prepared.deviceId, prepared.requestNonce, prepared.secret
                             )
                         })
                     }
                 }
             })
-        }
     }
 
-    internal fun verifyResponse(raw: String, deviceId: String, requestNonce: String, secret: String) {
+    internal fun verifyResponse(
+        raw: String,
+        deviceId: String,
+        requestNonce: String,
+        secret: String
+    ): MdmTelemetryResult {
         val response = JSONObject(raw)
         if (!response.optBoolean("ok", false)) {
             error("SAFE BRIDGE rejected telemetry: ${response.optString("error", "UNKNOWN")}")
@@ -67,11 +90,20 @@ internal class MdmTelemetryClient(
         response.remove("response_signature")
         val expected = MdmCrypto.hmacBase64Url(secret, MdmCanonicalJson.stringify(response))
         if (!MdmCrypto.constantTimeEquals(expected, signature)) error("Invalid response signature")
+        val data = response.optJSONObject("data")
         if (response.optInt("contract_version") != CONTRACT_VERSION ||
             response.optString("device_id") != deviceId ||
             response.optString("request_nonce") != requestNonce ||
-            !response.optJSONObject("data")?.optBoolean("telemetry_accepted", false).orFalse()
+            !data?.optBoolean("telemetry_accepted", false).orFalse()
         ) error("Response does not acknowledge telemetry")
+        return MdmTelemetryResult(
+            approvalState = data?.optString("approval_state", "PENDING_APPROVAL").orEmpty(),
+            commandsEnabled = data?.optBoolean("commands_enabled", false) == true,
+            mode = ManagedMode.parse(data?.optString("mode")).wireValue,
+            modeRevision = data?.optLong("mode_revision", -1L) ?: -1L,
+            commandId = data?.optString("command_id").orEmpty(),
+            configSnapshot = data?.optJSONObject("config_snapshot")
+        )
     }
 
     private fun Boolean?.orFalse(): Boolean = this == true
@@ -79,7 +111,7 @@ internal class MdmTelemetryClient(
     private companion object {
         const val CONTRACT_VERSION = 1
         const val ACTION_TELEMETRY = "telemetry"
-        const val MAX_RESPONSE_BYTES = 20_000
+        const val MAX_RESPONSE_BYTES = 100_000
         val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
     }
 }

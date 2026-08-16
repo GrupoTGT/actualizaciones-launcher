@@ -4,7 +4,7 @@
 
 - Apps Script project: `1qv79yC0SqqdzguF0IOgym_wK8kCBM_-tdUFCn2ecXrNLDpZ6MlRifEc0`
 - Web App deployment: `AKfycby2-olpj2Y9wryLca77Jd5a01nROHf8C2XvyfU_wlk94DlAjR9mGE81uTwCPLj-x0E5`
-- Active deployment version: `6`.
+- Active deployment version: `11` (`3.1.0-mode-ack`).
 - Endpoint: `https://script.google.com/macros/s/AKfycby2-olpj2Y9wryLca77Jd5a01nROHf8C2XvyfU_wlk94DlAjR9mGE81uTwCPLj-x0E5/exec`
 - Execution identity: deploying operator.
 - Access: public endpoint; application-level access is restricted by the signed
@@ -22,6 +22,10 @@ Enrollment is deliberately split into two states:
 3. An operator compares the credential fingerprint shown by the device with
    `_SB_DEVICES.credential_fingerprint` and performs the single required
    approval.
+4. The bridge binds the secret in protected Script Properties only after that
+   approval and only when the request fingerprint still matches the approved
+   fingerprint. Approval with an empty fingerprint is rejected. Pending
+   registrations cannot preclaim a device credential.
 
 An unknown or spoofed device can therefore create a pending inventory row but
 cannot obtain configuration that releases the launcher or execute commands.
@@ -89,8 +93,19 @@ an additional one-shot report. The job is independent of `MainActivity` lifetime
 Telemetry uses the same per-device credential and signed envelope rules as
 enrollment. The bridge accepts it only for a registered device, consumes the nonce,
 stores an append-only snapshot in `_SB_TELEMETRY`, updates the current inventory,
-and returns a signed acknowledgement. This endpoint does not execute commands.
+and returns a signed acknowledgement. For approved devices it also returns the
+current signed mode/config directive. Android persists it and requests reconciliation
+even when `MainActivity` was not running.
+
+When an operator changes the visible managed mode, the bridge atomically increments
+the per-device revision and appends a `SET_MANAGED_MODE` entry to `_SB_COMMANDS`.
+The command remains `PENDING_ACK` until a later authenticated heartbeat reports the
+same applied mode and revision; only then is it marked `ACK_APPLIED` and copied to
+`_SB_ACKS`. Telemetry never treats delivery as successful application.
 
 Reported values come from Android system APIs. Unobservable values are explicitly
 labelled `NO DISPONIBLE`, `NO VERIFICABLE` or `PERMISO DENEGADO`; in particular,
 VoWiFi is not inferred from generic Wi-Fi or telephony connectivity.
+
+Android and Apps Script share a golden canonical-JSON/HMAC vector, including control
+characters, Unicode and `</...>` escaping, to prevent cross-runtime signature drift.

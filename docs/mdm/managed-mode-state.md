@@ -13,6 +13,11 @@ revision, transition phase and last error. An interrupted `PENDING`, `APPLYING`
 or `ERROR` transition is reconciled idempotently from the persisted desired
 state on activity start, resume, boot and package replacement.
 
+The periodic signed heartbeat receives the same directive while the launcher is
+in the background. A new revision is persisted and causes `MainActivity` to
+reconcile HOME/LockTask. The server leaves the command pending until a later
+heartbeat reports the matching applied mode and revision.
+
 Temporary IT maintenance remains separate. When it ends, the APK restores the
 authenticated managed mode rather than assuming that every terminal must return
 to LockTask.

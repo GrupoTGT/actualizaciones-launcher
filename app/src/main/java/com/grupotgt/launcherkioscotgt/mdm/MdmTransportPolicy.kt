@@ -11,7 +11,9 @@ internal object MdmTransportPolicy {
         service: String = "SAFE BRIDGE"
     ): String {
         if (!successful) {
-            if (statusCode in 500..599) throw IOException("$service HTTP $statusCode")
+            if (statusCode == 408 || statusCode == 429 || statusCode in 500..599) {
+                throw IOException("$service HTTP $statusCode")
+            }
             error("$service HTTP $statusCode")
         }
         if (rawBody.isBlank() || rawBody.length > maxBytes) error("$service returned an invalid body")

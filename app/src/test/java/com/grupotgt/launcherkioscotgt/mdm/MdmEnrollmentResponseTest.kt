@@ -70,6 +70,30 @@ class MdmEnrollmentResponseTest {
         }
     }
 
+    @Test
+    fun signedTelemetryCarriesManagedDirectiveAndCommandAckIdentity() {
+        val data = JSONObject()
+            .put("telemetry_accepted", true)
+            .put("approval_state", "APPROVED")
+            .put("commands_enabled", true)
+            .put("mode", "LIBRE GESTIONADO")
+            .put("mode_revision", 11)
+            .put("command_id", "device-12345678-MODE-11")
+        val body = JSONObject()
+            .put("ok", true)
+            .put("contract_version", 1)
+            .put("server_time_ms", 1L)
+            .put("device_id", deviceId)
+            .put("request_nonce", nonce)
+            .put("data", data)
+        body.put("response_signature", MdmCrypto.hmacBase64Url(secret, MdmCanonicalJson.stringify(body)))
+        val result = MdmTelemetryClient(endpoint).verifyResponse(body.toString(), deviceId, nonce, secret)
+        assertTrue(result.commandsEnabled)
+        assertEquals("LIBRE GESTIONADO", result.mode)
+        assertEquals(11L, result.modeRevision)
+        assertEquals("device-12345678-MODE-11", result.commandId)
+    }
+
     private fun signedEnrollment(state: String, commands: Boolean, mode: String, revision: Long): String {
         val body = JSONObject()
             .put("ok", true)

@@ -7,7 +7,9 @@ import android.app.job.JobScheduler
 import android.app.job.JobService
 import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import com.grupotgt.launcherkioscotgt.AppLog
+import com.grupotgt.launcherkioscotgt.MainActivity
 import okhttp3.Call
 import java.util.concurrent.ConcurrentHashMap
 
@@ -22,9 +24,16 @@ class MdmHeartbeatJobService : JobService() {
             require(deviceId.isNotBlank()) { "device_id unavailable" }
             val secret = MdmCredentialStore(this).requireExistingSecret()
             val payload = MdmTelemetryCollector.collect(this)
-            val call = MdmTelemetryClient().send(deviceId, secret, payload) { sent ->
-                sent.onSuccess {
+            val client = MdmTelemetryClient()
+            val prepared = client.prepare(deviceId, secret, payload)
+            activeCalls[params.jobId] = prepared.call
+            client.enqueue(prepared) { sent ->
+                sent.onSuccess { response ->
                     AppLog.success("MDM HEARTBEAT -> telemetría firmada confirmada")
+                    runCatching { applyAuthenticatedResponse(deviceId, response) }
+                        .onFailure { error ->
+                            AppLog.error("MDM HEARTBEAT -> respuesta no aplicada: ${error.message}")
+                        }
                 }.onFailure { error ->
                     AppLog.error("MDM HEARTBEAT -> no confirmada: ${error.message}")
                 }
@@ -32,7 +41,6 @@ class MdmHeartbeatJobService : JobService() {
                     jobFinished(params, MdmTransportPolicy.shouldRetry(sent.exceptionOrNull()))
                 }
             }
-            activeCalls[params.jobId] = call
         }
         result.onFailure { error ->
             AppLog.error("MDM HEARTBEAT -> no iniciado: ${error.message}")
@@ -44,6 +52,36 @@ class MdmHeartbeatJobService : JobService() {
     override fun onStopJob(params: JobParameters): Boolean {
         activeCalls.remove(params.jobId)?.cancel()
         return true
+    }
+
+    private fun applyAuthenticatedResponse(deviceId: String, response: MdmTelemetryResult) {
+        if (response.approvalState != "APPROVED" || !response.commandsEnabled) return
+        val before = ManagedModeStore.state(this)
+        if (!ManagedModeStore.acceptAuthenticated(this, response.mode, response.modeRevision)) {
+            AppLog.warning("MDM HEARTBEAT -> modo rechazado por revisión obsoleta o contradictoria")
+            return
+        }
+        response.configSnapshot?.let { snapshot ->
+            MdmConfigCache(this).update(deviceId, snapshot).onFailure { error ->
+                AppLog.error("MDM HEARTBEAT -> snapshot rechazado: ${error.message}")
+            }
+        }
+        val modeChanged = before.desiredMode.wireValue != response.mode ||
+            before.desiredRevision != response.modeRevision ||
+            before.appliedMode.wireValue != response.mode ||
+            before.appliedRevision != response.modeRevision
+        if (modeChanged) {
+            val intent = Intent(this, MainActivity::class.java)
+                .setAction(MainActivity.ACTION_RECONCILE_MANAGED_MODE)
+                .putExtra(MainActivity.EXTRA_RECONCILE_MANAGED_MODE, true)
+                .putExtra(
+                    MainActivity.EXTRA_INTERNAL_COMMAND_TOKEN,
+                    InternalCommandGate.issue(this, InternalCommandGate.ACTION_RECONCILE_MANAGED_MODE)
+                )
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            startActivity(intent)
+            AppLog.info("MDM HEARTBEAT -> reconciliación solicitada; command=${response.commandId}")
+        }
     }
 }
 
@@ -60,19 +98,24 @@ internal object MdmHeartbeatScheduler {
             .setPersisted(true)
             .setBackoffCriteria(30_000L, JobInfo.BACKOFF_POLICY_EXPONENTIAL)
         builder.setPeriodic(PERIOD_MS, 5 * 60 * 1000L)
-        scheduler.schedule(builder.build())
+        if (scheduler.schedule(builder.build()) != JobScheduler.RESULT_SUCCESS) {
+            AppLog.error("MDM HEARTBEAT -> JobScheduler rechazó el trabajo periódico")
+        }
     }
 
     @SuppressLint("SpecifyJobSchedulerIdRange")
     fun enqueueImmediate(context: Context) {
         val scheduler = context.getSystemService(Context.JOB_SCHEDULER_SERVICE) as JobScheduler
         val component = ComponentName(context, MdmHeartbeatJobService::class.java)
-        scheduler.schedule(
+        val result = scheduler.schedule(
             JobInfo.Builder(IMMEDIATE_JOB_ID, component)
                 .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
                 .setMinimumLatency(1_000L)
                 .setBackoffCriteria(30_000L, JobInfo.BACKOFF_POLICY_EXPONENTIAL)
                 .build()
         )
+        if (result != JobScheduler.RESULT_SUCCESS) {
+            AppLog.error("MDM HEARTBEAT -> JobScheduler rechazó el trabajo inmediato")
+        }
     }
 }

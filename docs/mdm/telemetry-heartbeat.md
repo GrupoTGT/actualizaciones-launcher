@@ -26,7 +26,12 @@ values are never converted into an affirmative state.
 
 ## Server storage
 
-The active SAFE BRIDGE deployment version is 6. It updates the latest state in
+The active SAFE BRIDGE deployment version is 11 (`3.1.0-mode-ack`). It updates the latest state in
 `_SB_DEVICES` and `1_TERMINALES`, appends normalized records to `_SB_TELEMETRY`,
 and records only a compact success/error audit entry. Secrets and raw signed
 requests are not written to spreadsheet cells or logs.
+
+Approved heartbeat responses carry the current mode revision, optional canonical
+snapshot and command identity. A changed directive is persisted before Android
+opens the launcher for idempotent reconciliation. The next measured heartbeat is
+the ACK; receipt alone never closes the command.
