@@ -1,11 +1,12 @@
 package com.grupotgt.launcherkioscotgt.mdm
 
-import android.util.Base64
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.security.SecureRandom
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
+import okio.ByteString.Companion.decodeBase64
+import okio.ByteString.Companion.toByteString
 
 internal object MdmCrypto {
     private val secureRandom = SecureRandom()
@@ -23,7 +24,8 @@ internal object MdmCrypto {
         .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
 
     fun fingerprint(secret: String): String {
-        val decoded = Base64.decode(secret, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
+        val decoded = secret.decodeBase64()?.toByteArray()
+            ?: error("Invalid MDM credential encoding")
         return MessageDigest.getInstance("SHA-256")
             .digest(decoded)
             .take(12)
@@ -41,8 +43,7 @@ internal object MdmCrypto {
         actual.toByteArray(StandardCharsets.UTF_8)
     )
 
-    private fun base64Url(bytes: ByteArray): String = Base64.encodeToString(
-        bytes,
-        Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING
-    )
+    private fun base64Url(bytes: ByteArray): String = bytes.toByteString()
+        .base64Url()
+        .trimEnd('=')
 }

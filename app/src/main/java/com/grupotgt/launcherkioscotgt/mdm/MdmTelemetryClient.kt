@@ -43,10 +43,13 @@ internal class MdmTelemetryClient(
                 override fun onResponse(call: Call, response: Response) {
                     response.use {
                         callback(runCatching {
-                            if (!response.isSuccessful) error("SAFE BRIDGE HTTP ${response.code}")
                             val raw = response.body?.string().orEmpty()
-                            if (raw.isBlank() || raw.length > MAX_RESPONSE_BYTES) error("Invalid response")
-                            verifyResponse(raw, deviceId, nonce, secret)
+                            verifyResponse(
+                                MdmTransportPolicy.validatedBody(
+                                    response.code, response.isSuccessful, raw, MAX_RESPONSE_BYTES
+                                ),
+                                deviceId, nonce, secret
+                            )
                         })
                     }
                 }
@@ -54,7 +57,7 @@ internal class MdmTelemetryClient(
         }
     }
 
-    private fun verifyResponse(raw: String, deviceId: String, requestNonce: String, secret: String) {
+    internal fun verifyResponse(raw: String, deviceId: String, requestNonce: String, secret: String) {
         val response = JSONObject(raw)
         if (!response.optBoolean("ok", false)) {
             error("SAFE BRIDGE rejected telemetry: ${response.optString("error", "UNKNOWN")}")

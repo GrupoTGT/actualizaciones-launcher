@@ -29,7 +29,7 @@ class MdmHeartbeatJobService : JobService() {
                     AppLog.error("MDM HEARTBEAT -> no confirmada: ${error.message}")
                 }
                 if (activeCalls.remove(params.jobId) != null) {
-                    jobFinished(params, sent.isFailure)
+                    jobFinished(params, MdmTransportPolicy.shouldRetry(sent.exceptionOrNull()))
                 }
             }
             activeCalls[params.jobId] = call

@@ -15,6 +15,17 @@ internal enum class ManagedMode(val wireValue: String) {
     }
 }
 
+internal object ManagedModeRevisionPolicy {
+    fun accepts(
+        currentMode: ManagedMode,
+        currentRevision: Long,
+        proposedMode: ManagedMode,
+        proposedRevision: Long
+    ): Boolean = proposedRevision >= 0L &&
+        proposedRevision >= currentRevision &&
+        !(proposedRevision == currentRevision && currentRevision >= 0L && proposedMode != currentMode)
+}
+
 internal object ManagedModeStore {
     internal data class State(
         val desiredMode: ManagedMode,
@@ -27,13 +38,11 @@ internal object ManagedModeStore {
 
     @Synchronized
     fun acceptAuthenticated(context: Context, modeValue: String, revision: Long): Boolean {
-        if (revision < 0L) return false
         val mode = ManagedMode.parse(modeValue)
         val prefs = preferences(context)
         val currentRevision = prefs.getLong(KEY_DESIRED_REVISION, -1L)
         val currentMode = ManagedMode.parse(prefs.getString(KEY_DESIRED_MODE, null))
-        if (revision < currentRevision) return false
-        if (revision == currentRevision && currentRevision >= 0L && mode != currentMode) return false
+        if (!ManagedModeRevisionPolicy.accepts(currentMode, currentRevision, mode, revision)) return false
         if (revision == currentRevision && mode == currentMode) return true
 
         return prefs.edit()

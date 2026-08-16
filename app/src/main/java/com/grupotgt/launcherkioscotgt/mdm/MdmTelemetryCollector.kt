@@ -24,7 +24,6 @@ import java.net.Inet4Address
 
 internal object MdmTelemetryCollector {
     private const val NOT_AVAILABLE = "NO DISPONIBLE"
-    private const val NOT_VERIFIABLE = "NO VERIFICABLE"
     private const val PERMISSION_DENIED = "PERMISO DENEGADO"
 
     fun collect(context: Context): JSONObject {
@@ -36,13 +35,16 @@ internal object MdmTelemetryCollector {
         val wifiConnected = capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
         val cellularConnected = capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true
         val internetValidated = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
-        val transport = when {
-            wifiConnected -> "WIFI"
-            cellularConnected -> "MOVIL"
-            capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) == true -> "ETHERNET"
-            network == null -> "SIN CONEXION"
-            else -> "OTRA"
-        }
+        val airplane = runCatching {
+            Settings.Global.getInt(app.contentResolver, Settings.Global.AIRPLANE_MODE_ON, 0) == 1
+        }.getOrNull()
+        val networkState = MdmNetworkStateFactory.create(
+            wifiConnected = wifiConnected,
+            mobileConnected = cellularConnected,
+            ethernetConnected = capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) == true,
+            internetValidated = internetValidated,
+            airplaneMode = airplane == true
+        )
         val ip = link?.linkAddresses
             ?.asSequence()
             ?.map { it.address }
@@ -54,10 +56,10 @@ internal object MdmTelemetryCollector {
         val mode = ManagedModeStore.state(app)
         val config = MdmConfigCache(app).load().getOrNull()
         val configuredApps = config?.apps ?: emptyList()
-        val installedApps = JSONArray()
-        configuredApps.forEach { configured ->
-            if (isPackageInstalled(app, configured.packageName)) installedApps.put(configured.packageName)
-        }
+        val appInventory = MdmAppInventory.from(
+            configuredApps.map { it.packageName },
+            configuredApps.map { it.packageName }.filter { isPackageInstalled(app, it) }
+        )
         val packageInfo = app.packageManager.getPackageInfo(app.packageName, 0)
         val versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             packageInfo.longVersionCode
@@ -73,9 +75,6 @@ internal object MdmTelemetryCollector {
             audio.getStreamVolume(AudioManager.STREAM_MUSIC) * 100 / maxVolume
         } else -1
         val storage = StatFs(Environment.getDataDirectory().absolutePath)
-        val airplane = runCatching {
-            Settings.Global.getInt(app.contentResolver, Settings.Global.AIRPLANE_MODE_ON, 0) == 1
-        }.getOrNull()
         val brightness = runCatching {
             Settings.System.getInt(app.contentResolver, Settings.System.SCREEN_BRIGHTNESS) * 100 / 255
         }.getOrNull()
@@ -88,12 +87,12 @@ internal object MdmTelemetryCollector {
             .put("battery_percent", battery.first)
             .put("charging", battery.second)
             .put("ip", ip)
-            .put("network_transport", transport)
-            .put("wifi_connected", wifiConnected)
+            .put("network_transport", networkState.transport)
+            .put("wifi_connected", networkState.wifiConnected)
             .put("ssid", wifi.first)
             .put("wifi_rssi_dbm", wifi.second)
-            .put("internet_validated", internetValidated)
-            .put("mobile_data_connected", cellularConnected)
+            .put("internet_validated", networkState.internetValidated)
+            .put("mobile_data_connected", networkState.mobileConnected)
             .put("airplane_mode", airplane ?: NOT_AVAILABLE)
             .put("brightness_percent", brightness ?: NOT_AVAILABLE)
             .put("volume_percent", if (volumePercent >= 0) volumePercent else NOT_AVAILABLE)
@@ -110,10 +109,10 @@ internal object MdmTelemetryCollector {
             .put("last_error", mode.lastError.ifBlank { "SIN ERROR" })
             .put("agenda_status", if (config == null) NOT_AVAILABLE else "CACHE VALIDADA")
             .put("agenda_contacts", config?.contacts?.size ?: 0)
-            .put("configured_apps", JSONArray(configuredApps.map { it.packageName }))
-            .put("installed_configured_apps", installedApps)
+            .put("configured_apps", JSONArray(appInventory.configured))
+            .put("installed_configured_apps", JSONArray(appInventory.installedConfigured))
             .put("telephony_capable", app.packageManager.hasSystemFeature(PackageManager.FEATURE_TELEPHONY))
-            .put("vowifi_state", NOT_VERIFIABLE)
+            .put("vowifi_state", networkState.vowifiState)
     }
 
     private fun batteryState(context: Context): Pair<Any, Any> {

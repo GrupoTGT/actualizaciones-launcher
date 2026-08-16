@@ -75,12 +75,13 @@ internal class MdmEnrollmentClient(
                 override fun onResponse(call: Call, response: Response) {
                     response.use {
                         callback(runCatching {
-                            if (!response.isSuccessful) error("SAFE BRIDGE HTTP ${response.code}")
                             val raw = response.body?.string().orEmpty()
-                            if (raw.isBlank() || raw.length > MAX_RESPONSE_BYTES) {
-                                error("SAFE BRIDGE returned an invalid body")
-                            }
-                            parseAndVerifyResponse(raw, deviceId, nonce, secret)
+                            parseAndVerifyResponse(
+                                MdmTransportPolicy.validatedBody(
+                                    response.code, response.isSuccessful, raw, MAX_RESPONSE_BYTES
+                                ),
+                                deviceId, nonce, secret
+                            )
                         })
                     }
                 }
@@ -88,7 +89,7 @@ internal class MdmEnrollmentClient(
         }
     }
 
-    private fun parseAndVerifyResponse(
+    internal fun parseAndVerifyResponse(
         raw: String,
         deviceId: String,
         requestNonce: String,
