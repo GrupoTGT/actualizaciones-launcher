@@ -26,10 +26,8 @@ import android.net.wifi.WifiManager
 import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
-import android.os.Environment
 import android.os.Handler
 import android.os.Looper
-import android.os.StatFs
 import android.os.SystemClock
 import android.os.Vibrator
 import android.provider.Settings
@@ -60,22 +58,21 @@ import androidx.core.widget.TextViewCompat
 import com.grupotgt.launcherkioscotgt.mdm.InternalCommandGate
 import com.grupotgt.launcherkioscotgt.mdm.ManagedMode
 import com.grupotgt.launcherkioscotgt.mdm.ManagedModeStore
+import com.grupotgt.launcherkioscotgt.mdm.MdmBridgeConfig
 import com.grupotgt.launcherkioscotgt.mdm.MdmConfigCache
 import com.grupotgt.launcherkioscotgt.mdm.MdmConfigSnapshot
 import com.grupotgt.launcherkioscotgt.mdm.MdmEnrollmentCoordinator
+import com.grupotgt.launcherkioscotgt.mdm.MdmHeartbeatScheduler
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
-import okhttp3.MediaType.Companion.toMediaTypeOrNull
-import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
-import java.net.NetworkInterface
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -648,6 +645,7 @@ class BootAndReplacedReceiver : BroadcastReceiver() {
         val ctx = context ?: return
 
         AppLog.inicializar(ctx)
+        MdmHeartbeatScheduler.schedule(ctx)
 
         when (accion) {
             Intent.ACTION_BOOT_COMPLETED -> {
@@ -1002,7 +1000,6 @@ class MainActivity : AppCompatActivity() {
 
     private val URL_GOOGLE_SHEETS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSye0TO9CYH8xXSPy-rCNDOO4UjiNdmp32SiOWLwxsUPI25ZW9rHW44JlAPn38_4vVpJK5Pw6tu5Ct0/pub?output=csv"
     private val URL_OTA_JSON = "https://grupotgt.github.io/actualizaciones-launcher/version.json"
-    private val URL_MDM_SAFE_BRIDGE = "https://script.google.com/macros/s/AKfycby2-olpj2Y9wryLca77Jd5a01nROHf8C2XvyfU_wlk94DlAjR9mGE81uTwCPLj-x0E5/exec"
 
     private val handler = Handler(Looper.getMainLooper())
 
@@ -1277,7 +1274,8 @@ class MainActivity : AppCompatActivity() {
             }
 
             cargarIdentificacionYLogo()
-            MdmEnrollmentCoordinator.enroll(this, URL_MDM_SAFE_BRIDGE) { enrollment ->
+            MdmHeartbeatScheduler.schedule(this)
+            MdmEnrollmentCoordinator.enroll(this, MdmBridgeConfig.ENDPOINT) { enrollment ->
                 if (enrollment.approvalState == "APPROVED" && enrollment.commandsEnabled) {
                     runOnUiThread {
                         val accepted = ManagedModeStore.acceptAuthenticated(
@@ -4022,255 +4020,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     // --- SISTEMA DE INVENTARIO Y TELEMETRÍA MDM TGT ---
-    @SuppressLint("MissingPermission")
     private fun enviarTelemetriaMDM() {
-        Thread {
-            try {
-                val prefs = getSharedPreferences("ConfigKiosco", Context.MODE_PRIVATE)
-                val ubicacion = prefs.getString("ubicacion_dispositivo", "Desconocida") ?: "Desconocida"
-                val androidId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID) ?: "Desconocido"
-
-                val fabricante = Build.MANUFACTURER.uppercase(Locale.getDefault())
-                val modelo = Build.MODEL ?: "Desconocido"
-                val dispositivoFull = "$fabricante $modelo"
-                val androidOS = "Android ${Build.VERSION.RELEASE} (API ${Build.VERSION.SDK_INT})"
-
-                val pInfo = packageManager.getPackageInfo(packageName, 0)
-                val versionApp = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) pInfo.longVersionCode.toString() else pInfo.versionCode.toString()
-
-                val batteryStatus = registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-                val level = batteryStatus?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
-                val scale = batteryStatus?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
-                val isCharging = batteryStatus?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) == BatteryManager.BATTERY_STATUS_CHARGING
-                val pctBateria = if (scale > 0) (level * 100) / scale else 0
-                val estadoBat = if (isCharging) "🔌 $pctBateria%" else "🔋 $pctBateria%"
-
-                val tempBat = batteryStatus?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) ?: 0
-                val temperaturaFinal = "${tempBat / 10.0}ºC"
-
-                val health = batteryStatus?.getIntExtra(BatteryManager.EXTRA_HEALTH, 0) ?: 0
-                val saludBat = when (health) {
-                    BatteryManager.BATTERY_HEALTH_GOOD -> "❤️ Buena"
-                    BatteryManager.BATTERY_HEALTH_OVERHEAT -> "🔥 Sobrecalentada"
-                    BatteryManager.BATTERY_HEALTH_DEAD -> "💀 Muerta"
-                    BatteryManager.BATTERY_HEALTH_OVER_VOLTAGE -> "⚡ Sobretensión"
-                    BatteryManager.BATTERY_HEALTH_UNSPECIFIED_FAILURE -> "❌ Fallo"
-                    BatteryManager.BATTERY_HEALTH_COLD -> "❄️ Fría"
-                    else -> "❓ Desconocida"
-                }
-
-                var macReal = "02:00:00:00:00:00"
-                try {
-                    val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
-                    val adminName = ComponentName(this@MainActivity, MyAdminReceiver::class.java)
-                    if (dpm.isDeviceOwnerApp(packageName)) {
-                        val macDpm = dpm.getWifiMacAddress(adminName)
-                        if (!macDpm.isNullOrEmpty()) {
-                            macReal = macDpm
-                        }
-                    }
-                } catch (e: Exception) {}
-
-                if (macReal == "02:00:00:00:00:00") {
-                    try {
-                        val interfaces = NetworkInterface.getNetworkInterfaces()
-                        while (interfaces.hasMoreElements()) {
-                            val intf = interfaces.nextElement()
-                            if (intf.name.equals("wlan0", ignoreCase = true)) {
-                                val macBytes = intf.hardwareAddress
-                                if (macBytes != null) {
-                                    val res1 = StringBuilder()
-                                    for (b in macBytes) res1.append(String.format("%02X:", b))
-                                    if (res1.isNotEmpty()) res1.deleteCharAt(res1.length - 1)
-                                    macReal = res1.toString()
-                                }
-                            }
-                        }
-                    } catch (e: Exception) {}
-                }
-
-                var ipLocal = "Desconectado"
-                var tipoConexionStr = "Ninguna"
-                try {
-                    val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-                    val activeNetwork = cm.activeNetwork
-                    if (activeNetwork != null) {
-                        val caps = cm.getNetworkCapabilities(activeNetwork)
-                        if (caps != null) {
-                            if (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) tipoConexionStr = "Wi-Fi"
-                            else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) tipoConexionStr = "Datos Móviles"
-                            else if (caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) tipoConexionStr = "Ethernet"
-                        }
-                    }
-
-                    val interfaces = NetworkInterface.getNetworkInterfaces()
-                    while (interfaces.hasMoreElements()) {
-                        val intf = interfaces.nextElement()
-                        val addrs = intf.inetAddresses
-                        while (addrs.hasMoreElements()) {
-                            val addr = addrs.nextElement()
-                            if (!addr.isLoopbackAddress && addr.hostAddress?.indexOf(':') == -1) {
-                                ipLocal = addr.hostAddress.toString()
-                            }
-                        }
-                    }
-                } catch (e: Exception) {}
-
-                var nombreRedStr = "Desconectado"
-                try {
-                    val wifiMgr = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-                    val info = wifiMgr.connectionInfo
-                    if (info != null && info.networkId != -1) {
-                        nombreRedStr = info.ssid.replace("\"", "")
-                        if (nombreRedStr == "<unknown ssid>") nombreRedStr = "Oculta/Desconocida"
-                    }
-                } catch (e: Exception) {}
-
-                var operadoraFinal = "Sin SIM / Desconocida"
-                try {
-                    val tm = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
-                    val opName = tm.networkOperatorName
-                    if (!opName.isNullOrBlank()) {
-                        operadoraFinal = opName
-                    }
-                } catch (e: Exception) {}
-
-                val wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager
-                val rssi = wifiManager?.connectionInfo?.rssi ?: 0
-
-                var espacioLibre = "Desconocido"
-                try {
-                    val stat = StatFs(Environment.getExternalStorageDirectory().path)
-                    val gbDisponibles = (stat.availableBlocksLong * stat.blockSizeLong) / (1024 * 1024 * 1024)
-                    val gbTotales = (stat.blockCountLong * stat.blockSizeLong) / (1024 * 1024 * 1024)
-                    espacioLibre = "$gbDisponibles GB libres (de $gbTotales GB)"
-                } catch (e: Exception) {}
-
-                var ramEstado = "Desconocida"
-                try {
-                    val actManager = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
-                    val memInfo = android.app.ActivityManager.MemoryInfo()
-                    actManager.getMemoryInfo(memInfo)
-                    val ramLibreGB = String.format(Locale.US, "%.2f", memInfo.availMem / (1024.0 * 1024.0 * 1024.0))
-                    val ramTotalGB = String.format(Locale.US, "%.2f", memInfo.totalMem / (1024.0 * 1024.0 * 1024.0))
-                    ramEstado = "$ramLibreGB GB libres (de $ramTotalGB GB)"
-                } catch (e: Exception) {}
-
-                var brilloPantalla = "Desconocido"
-                try {
-                    val brightness = Settings.System.getInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS)
-                    val pctBrillo = (brightness * 100) / 255
-                    brilloPantalla = "$pctBrillo%"
-                    prefs.edit().putInt("mdm_ultimo_brillo_real_pct", pctBrillo).apply()
-                } catch (e: Exception) {
-                    val ultimo = prefs.getInt("mdm_ultimo_brillo_real_pct", -1)
-                    if (ultimo >= 0) brilloPantalla = "$ultimo%"
-                    AppLog.error("Telemetría: no se pudo leer brillo actual: ${e.message}")
-                }
-
-                var volumenApp = "Desconocido"
-                try {
-                    val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                    val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-                    val volActual = am.getStreamVolume(AudioManager.STREAM_MUSIC)
-
-                    // Durante una locución TTS subimos MUSIC temporalmente al máximo. Para el
-                    // Inventario interesa el nivel estable del terminal, no ese pico transitorio.
-                    val volEstable = volumenAntesDeTts ?: volActual
-                    val pctVol = if (maxVol > 0) (volEstable * 100) / maxVol else 0
-                    prefs.edit().putInt("mdm_ultimo_volumen_real_pct", pctVol).apply()
-                    volumenApp = if (pctVol == 0) "🔇 Silenciado" else "🔊 $pctVol%"
-                } catch (e: Exception) {
-                    val ultimo = prefs.getInt("mdm_ultimo_volumen_real_pct", -1)
-                    if (ultimo >= 0) volumenApp = if (ultimo == 0) "🔇 Silenciado" else "🔊 $ultimo%"
-                    AppLog.error("Telemetría: no se pudo leer volumen actual: ${e.message}")
-                }
-
-                AppLog.info("Telemetría MDM -> Brillo=$brilloPantalla | Volumen=$volumenApp")
-
-                var estadoKiosco = "Desconocido"
-                try {
-                    val am = getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
-                    val lockTaskMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                        am.lockTaskModeState
-                    } else {
-                        @Suppress("DEPRECATION")
-                        if (am.isInLockTaskMode) 1 else 0
-                    }
-                    estadoKiosco = if (lockTaskMode != 0) "🔒 Activo" else "🔓 ROTO / Inactivo"
-                } catch (e: Exception) {}
-
-                var esOwner = "❌ No"
-                try {
-                    val dpm = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
-                    if (dpm.isDeviceOwnerApp(packageName)) esOwner = "✅ Sí"
-                } catch (e: Exception) {}
-
-                val uptimeMillis = SystemClock.elapsedRealtime()
-                val dias = java.util.concurrent.TimeUnit.MILLISECONDS.toDays(uptimeMillis)
-                val horas = java.util.concurrent.TimeUnit.MILLISECONDS.toHours(uptimeMillis) % 24
-                val uptimeFinal = "${dias}d ${horas}h"
-
-                val intrusos = prefs.getInt("intentos_fallidos_pin", 0).toString()
-                val appsActivas = prefs.getString("apps_permitidas", "Ninguna") ?: "Ninguna"
-                val ultimaSincro = prefs.getString("ultima_sincro", "Nunca") ?: "Nunca"
-
-                val logsCompletos = AppLog.obtenerLogs().lines()
-                val ultimosLogs = if (logsCompletos.size > 3) {
-                    logsCompletos.takeLast(3).joinToString("\n")
-                } else {
-                    logsCompletos.joinToString("\n")
-                }
-
-                val json = JSONObject()
-                json.put("fecha", SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault()).format(Date()))
-                json.put("ubicacion", ubicacion)
-                json.put("dispositivo", dispositivoFull)
-                json.put("androidOS", androidOS)
-                json.put("mac", macReal)
-                json.put("androidId", androidId)
-                json.put("ip", ipLocal)
-                json.put("conexion", tipoConexionStr)
-                json.put("redSSID", nombreRedStr)
-                json.put("operadora", operadoraFinal)
-                json.put("rssi", "$rssi dBm")
-                json.put("bateria", estadoBat)
-                json.put("saludBateria", saludBat)
-                json.put("temperatura", temperaturaFinal)
-                json.put("ram", ramEstado)
-                json.put("almacenamiento", espacioLibre)
-                json.put("brillo", brilloPantalla)
-                json.put("volumen", volumenApp)
-                json.put("uptime", uptimeFinal)
-                json.put("estadoKiosco", estadoKiosco)
-                json.put("deviceOwner", esOwner)
-                json.put("version", "v$versionApp")
-                json.put("intrusiones", intrusos)
-                json.put("apps", appsActivas)
-                json.put("ultimaSincro", ultimaSincro)
-                json.put("logs", ultimosLogs)
-
-                val mediaType = "application/json; charset=utf-8".toMediaTypeOrNull()
-                val body = json.toString().toRequestBody(mediaType)
-
-                val request = Request.Builder()
-                    .url("https://script.google.com/macros/s/AKfycbzs4U3PgP7gYTBGxFql0TyLY7fC6XQxzYLyPNOAn8nQlqQQFXAHIMQrXDyo5zwavg3etA/exec")
-                    .post(body)
-                    .build()
-
-                OkHttpClient().newCall(request).execute().use { response ->
-                    val respuestaScript = response.body?.string()?.trim().orEmpty()
-                    if (response.isSuccessful && respuestaScript.equals("OK", ignoreCase = true)) {
-                        AppLog.info("📡 Inventario MDM actualizado correctamente. Brillo=$brilloPantalla | Volumen=$volumenApp")
-                    } else {
-                        // Apps Script puede devolver HTTP 200 incluso cuando su doPost() responde
-                        // con texto "ERROR: ...". Antes lo registrábamos falsamente como éxito.
-                        AppLog.error("Inventario MDM NO confirmado. HTTP=${response.code} respuesta=[$respuestaScript]")
-                    }
-                }
-            } catch (e: Exception) {
-                AppLog.error("Fallo al ejecutar telemetría MDM: ${e.message}")
-            }
-        }.start()
+        MdmHeartbeatScheduler.enqueueImmediate(this)
     }
 }

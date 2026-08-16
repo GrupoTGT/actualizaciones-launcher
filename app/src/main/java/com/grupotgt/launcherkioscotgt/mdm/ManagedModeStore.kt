@@ -16,6 +16,15 @@ internal enum class ManagedMode(val wireValue: String) {
 }
 
 internal object ManagedModeStore {
+    internal data class State(
+        val desiredMode: ManagedMode,
+        val desiredRevision: Long,
+        val appliedMode: ManagedMode,
+        val appliedRevision: Long,
+        val phase: String,
+        val lastError: String
+    )
+
     @Synchronized
     fun acceptAuthenticated(context: Context, modeValue: String, revision: Long): Boolean {
         if (revision < 0L) return false
@@ -43,6 +52,18 @@ internal object ManagedModeStore {
         .getLong(KEY_DESIRED_REVISION, -1L)
 
     fun isManagedFree(context: Context): Boolean = desiredMode(context) == ManagedMode.LIBRE_GESTIONADO
+
+    fun state(context: Context): State {
+        val prefs = preferences(context)
+        return State(
+            desiredMode = ManagedMode.parse(prefs.getString(KEY_DESIRED_MODE, null)),
+            desiredRevision = prefs.getLong(KEY_DESIRED_REVISION, -1L),
+            appliedMode = ManagedMode.parse(prefs.getString(KEY_APPLIED_MODE, null)),
+            appliedRevision = prefs.getLong(KEY_APPLIED_REVISION, -1L),
+            phase = prefs.getString(KEY_PHASE, PHASE_PENDING).orEmpty(),
+            lastError = prefs.getString(KEY_LAST_ERROR, "").orEmpty()
+        )
+    }
 
     fun markApplying(context: Context, mode: ManagedMode): Boolean = preferences(context).edit()
         .putString(KEY_PHASE, "APPLYING_${mode.name}")

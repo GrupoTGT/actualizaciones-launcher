@@ -12,6 +12,7 @@ const MDM = Object.freeze({
     devices: '_SB_DEVICES',
     nonces: '_SB_NONCES',
     audit: '_SB_AUDIT',
+    telemetry: '_SB_TELEMETRY',
     contacts: '2_AGENDA',
     contactProfiles: '_MDM_CONTACT_PROFILE',
     apps: '3_APLICACIONES',
@@ -33,10 +34,9 @@ function doGet() {
 function doPost(e) {
   try {
     const request = parseRequest_(e);
-    if (request.action !== 'enroll') {
-      throw bridgeError_('UNSUPPORTED_ACTION', 'Action is not enabled in this deployment.');
-    }
-    return jsonOutput_(enroll_(request));
+    if (request.action === 'enroll') return jsonOutput_(enroll_(request));
+    if (request.action === 'telemetry') return jsonOutput_(telemetry_(request));
+    throw bridgeError_('UNSUPPORTED_ACTION', 'Action is not enabled in this deployment.');
   } catch (error) {
     const code = error && error.bridgeCode ? error.bridgeCode : 'INTERNAL_ERROR';
     audit_('ERROR', code, safeErrorMessage_(error));
@@ -46,6 +46,148 @@ function doPost(e) {
       error: code
     });
   }
+}
+
+function telemetry_(request) {
+  validateEnvelope_(request);
+  const properties = PropertiesService.getScriptProperties();
+  const secret = properties.getProperty(secretPropertyKey_(request.device_id));
+  if (!secret) throw bridgeError_('UNKNOWN_DEVICE', 'Device credential is not registered.');
+  verifySignature_(request, secret);
+  consumeNonce_(request.device_id, request.nonce, request.timestamp_ms, request.action);
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    const devices = sheet_(MDM.sheets.devices);
+    ensureDeviceColumns_(devices);
+    const deviceRow = findRow_(devices, 1, request.device_id, 2);
+    if (!deviceRow) throw bridgeError_('UNKNOWN_DEVICE', 'Device inventory row is missing.');
+    const terminal = sheet_(MDM.sheets.terminals);
+    const terminalRow = findRow_(terminal, 1, request.device_id, 5);
+    const payload = normalizedTelemetry_(request.payload);
+    const now = new Date();
+
+    devices.getRange(deviceRow, 7).setValue(now);
+    devices.getRange(deviceRow, 8).setValue(payload.app_version);
+    devices.getRange(deviceRow, 9).setValue(payload.model);
+    devices.getRange(deviceRow, 10).setValue(payload.android);
+    devices.getRange(deviceRow, 11).setValue(payload.ip);
+    devices.getRange(deviceRow, 13).setValue(payload.battery_percent);
+    devices.getRange(deviceRow, 14).setValue(payload.charging);
+    devices.getRange(deviceRow, 15).setValue(payload.wifi_rssi_dbm);
+    devices.getRange(deviceRow, 16).setValue(payload.brightness_percent);
+    devices.getRange(deviceRow, 17).setValue(payload.volume_percent);
+    devices.getRange(deviceRow, 19).setValue(payload.internet_validated);
+    devices.getRange(deviceRow, 20).setValue(payload.ssid);
+    devices.getRange(deviceRow, 23).setValue(payload.network_transport);
+    devices.getRange(deviceRow, 24).setValue(payload.telephony_capable);
+    devices.getRange(deviceRow, 25).setValue(payload.transition_phase);
+    devices.getRange(deviceRow, 26).setValue(payload.last_error);
+    devices.getRange(deviceRow, 27).setValue(now);
+    devices.getRange(deviceRow, 28).setValue(payload.vowifi_state);
+    devices.getRange(deviceRow, 29).setValue(now);
+    devices.getRange(deviceRow, 35).setValue(payload.applied_mode);
+    devices.getRange(deviceRow, 38).setValue(payload.last_error === 'SIN ERROR' ? '' : payload.last_error);
+
+    if (terminalRow) updateTerminalTelemetry_(terminal, terminalRow, payload, now);
+    appendTelemetry_(request.device_id, payload, now);
+    audit_('INFO', 'TELEMETRY_OK', request.device_id);
+    return signedResponse_(request.device_id, request.nonce, {
+      telemetry_accepted: true,
+      received_at_ms: now.getTime()
+    }, secret);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function normalizedTelemetry_(payload) {
+  return {
+    app_version: safeCellText_(payload.app_version, 'NO DISPONIBLE', 80),
+    model: safeCellText_(payload.model, 'NO DISPONIBLE', 100),
+    android: safeCellText_(payload.android, 'NO DISPONIBLE', 80),
+    battery_percent: safeScalar_(payload.battery_percent),
+    charging: safeScalar_(payload.charging),
+    ip: safeCellText_(payload.ip, 'NO DISPONIBLE', 64),
+    network_transport: safeCellText_(payload.network_transport, 'NO DISPONIBLE', 40),
+    wifi_connected: payload.wifi_connected === true,
+    ssid: safeCellText_(payload.ssid, 'NO DISPONIBLE', 80),
+    wifi_rssi_dbm: safeScalar_(payload.wifi_rssi_dbm),
+    internet_validated: payload.internet_validated === true,
+    mobile_data_connected: payload.mobile_data_connected === true,
+    airplane_mode: safeScalar_(payload.airplane_mode),
+    brightness_percent: safeScalar_(payload.brightness_percent),
+    volume_percent: safeScalar_(payload.volume_percent),
+    device_owner: payload.device_owner === true,
+    lock_task_state: safeCellText_(payload.lock_task_state, 'NO DISPONIBLE', 32),
+    uptime_ms: safeNonNegativeNumber_(payload.uptime_ms),
+    storage_available_bytes: safeNonNegativeNumber_(payload.storage_available_bytes),
+    storage_total_bytes: safeNonNegativeNumber_(payload.storage_total_bytes),
+    desired_mode: safeMode_(payload.desired_mode),
+    desired_mode_revision: safeNonNegativeNumber_(payload.desired_mode_revision),
+    applied_mode: safeMode_(payload.applied_mode),
+    applied_mode_revision: safeNonNegativeNumber_(payload.applied_mode_revision),
+    transition_phase: safeCellText_(payload.transition_phase, 'NO DISPONIBLE', 60),
+    last_error: safeCellText_(payload.last_error, 'SIN ERROR', 240),
+    agenda_status: safeCellText_(payload.agenda_status, 'NO DISPONIBLE', 60),
+    agenda_contacts: safeNonNegativeNumber_(payload.agenda_contacts),
+    configured_apps: safeTextArray_(payload.configured_apps),
+    installed_configured_apps: safeTextArray_(payload.installed_configured_apps),
+    telephony_capable: payload.telephony_capable === true,
+    vowifi_state: safeCellText_(payload.vowifi_state, 'NO VERIFICABLE', 60)
+  };
+}
+
+function updateTerminalTelemetry_(sheet, row, payload, now) {
+  sheet.getRange(row, 7, 1, 18).setValues([[
+    'TELEMETRÍA REAL',
+    payload.internet_validated ? 'CONECTADO' : 'SIN INTERNET VALIDADO',
+    '0 min',
+    payload.battery_percent,
+    payload.charging,
+    payload.wifi_connected,
+    payload.internet_validated,
+    payload.wifi_rssi_dbm,
+    payload.mobile_data_connected,
+    payload.airplane_mode,
+    payload.vowifi_state,
+    'NO VERIFICABLE',
+    payload.device_owner,
+    payload.lock_task_state,
+    payload.app_version,
+    payload.last_error,
+    'SIN ACK PENDIENTE',
+    now
+  ]]);
+}
+
+function appendTelemetry_(deviceId, payload, now) {
+  const sheet = sheet_(MDM.sheets.telemetry);
+  const headers = [
+    'received_at', 'device_id', 'app_version', 'model', 'android', 'battery_percent',
+    'charging', 'ip', 'network_transport', 'wifi_connected', 'ssid', 'wifi_rssi_dbm',
+    'internet_validated', 'mobile_data_connected', 'airplane_mode', 'brightness_percent',
+    'volume_percent', 'device_owner', 'lock_task_state', 'uptime_ms',
+    'storage_available_bytes', 'storage_total_bytes', 'desired_mode',
+    'desired_mode_revision', 'applied_mode', 'applied_mode_revision', 'transition_phase',
+    'last_error', 'agenda_status', 'agenda_contacts', 'configured_apps',
+    'installed_configured_apps', 'telephony_capable', 'vowifi_state'
+  ];
+  ensureHeader_(sheet, headers);
+  sheet.appendRow([
+    now, deviceId, payload.app_version, payload.model, payload.android,
+    payload.battery_percent, payload.charging, payload.ip, payload.network_transport,
+    payload.wifi_connected, payload.ssid, payload.wifi_rssi_dbm,
+    payload.internet_validated, payload.mobile_data_connected, payload.airplane_mode,
+    payload.brightness_percent, payload.volume_percent, payload.device_owner,
+    payload.lock_task_state, payload.uptime_ms, payload.storage_available_bytes,
+    payload.storage_total_bytes, payload.desired_mode, payload.desired_mode_revision,
+    payload.applied_mode, payload.applied_mode_revision, payload.transition_phase,
+    payload.last_error, payload.agenda_status, payload.agenda_contacts,
+    payload.configured_apps.join(','), payload.installed_configured_apps.join(','),
+    payload.telephony_capable, payload.vowifi_state
+  ]);
 }
 
 function enroll_(request) {
@@ -424,6 +566,29 @@ function safeText_(value, fallback, maxLength) {
   const text = String(value === null || value === undefined ? '' : value).trim();
   if (!text) return fallback;
   return text.substring(0, maxLength);
+}
+
+function safeCellText_(value, fallback, maxLength) {
+  const text = safeText_(value, fallback, maxLength);
+  return /^[=+\-@]/.test(text) ? "'" + text : text;
+}
+
+function safeScalar_(value) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  return safeCellText_(value, 'NO DISPONIBLE', 80);
+}
+
+function safeNonNegativeNumber_(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : 0;
+}
+
+function safeTextArray_(value) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 200).map(function (item) {
+    return safeCellText_(item, '', 160);
+  }).filter(function (item) { return item.length > 0; });
 }
 
 function requireText_(value, field, minLength, maxLength) {

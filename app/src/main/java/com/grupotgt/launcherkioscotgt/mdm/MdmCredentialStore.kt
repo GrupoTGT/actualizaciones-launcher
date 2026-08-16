@@ -27,6 +27,10 @@ internal class MdmCredentialStore(context: Context) {
 
     fun fingerprint(): String = MdmCrypto.fingerprint(getOrCreateSecret())
 
+    @Synchronized
+    fun requireExistingSecret(): String = readSecret()
+        ?: throw IllegalStateException("MDM credential is not enrolled yet")
+
     private fun readSecret(): String? {
         val encrypted = preferences.getString(KEY_CIPHERTEXT, null) ?: return null
         val iv = preferences.getString(KEY_IV, null)

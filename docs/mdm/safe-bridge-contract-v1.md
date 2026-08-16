@@ -4,7 +4,7 @@
 
 - Apps Script project: `1qv79yC0SqqdzguF0IOgym_wK8kCBM_-tdUFCn2ecXrNLDpZ6MlRifEc0`
 - Web App deployment: `AKfycby2-olpj2Y9wryLca77Jd5a01nROHf8C2XvyfU_wlk94DlAjR9mGE81uTwCPLj-x0E5`
-- Active deployment version: `5`.
+- Active deployment version: `6`.
 - Endpoint: `https://script.google.com/macros/s/AKfycby2-olpj2Y9wryLca77Jd5a01nROHf8C2XvyfU_wlk94DlAjR9mGE81uTwCPLj-x0E5/exec`
 - Execution identity: deploying operator.
 - Access: public endpoint; application-level access is restricted by the signed
@@ -78,3 +78,19 @@ content revision. The Panel IT password is explicitly excluded.
 Android validates structure, identity, uniqueness, package names, phone numbers,
 revision and SHA-256 before an atomic commit. Empty, corrupt, unsigned, stale or
 same-revision/different-content responses leave the last valid snapshot intact.
+
+## Signed telemetry heartbeat
+
+Android registers a native, persisted `JobScheduler` job requiring network and
+running at Android's minimum periodic interval (15 minutes). Boot and package
+replacement reconcile the schedule, while foreground synchronization may enqueue
+an additional one-shot report. The job is independent of `MainActivity` lifetime.
+
+Telemetry uses the same per-device credential and signed envelope rules as
+enrollment. The bridge accepts it only for a registered device, consumes the nonce,
+stores an append-only snapshot in `_SB_TELEMETRY`, updates the current inventory,
+and returns a signed acknowledgement. This endpoint does not execute commands.
+
+Reported values come from Android system APIs. Unobservable values are explicitly
+labelled `NO DISPONIBLE`, `NO VERIFICABLE` or `PERMISO DENEGADO`; in particular,
+VoWiFi is not inferred from generic Wi-Fi or telephony connectivity.
