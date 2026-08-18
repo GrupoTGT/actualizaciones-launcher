@@ -28,7 +28,7 @@ internal data class MdmPreparedTelemetry(
 
 internal class MdmTelemetryClient(
     private val endpoint: String = MdmBridgeConfig.ENDPOINT,
-    private val httpClient: OkHttpClient = OkHttpClient()
+    private val httpClient: OkHttpClient = MdmHttpClientFactory.create()
 ) {
     fun prepare(deviceId: String, secret: String, payload: JSONObject): MdmPreparedTelemetry {
         val nonce = MdmCrypto.newNonce()

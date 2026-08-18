@@ -23,7 +23,7 @@ internal data class MdmEnrollmentResult(
 
 internal class MdmEnrollmentClient(
     private val endpoint: String,
-    private val httpClient: OkHttpClient = OkHttpClient()
+    private val httpClient: OkHttpClient = MdmHttpClientFactory.create()
 ) {
     fun enroll(
         deviceId: String,

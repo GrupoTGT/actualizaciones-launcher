@@ -3,7 +3,7 @@
 const MDM = Object.freeze({
   spreadsheetId: '1MhpLIjGF2ZOliUO_Bske_oZ8Zcq-2rTLNiI3rSIj1nw',
   contractVersion: 1,
-  serviceVersion: '3.1.0-mode-ack',
+  serviceVersion: '3.3.0-minimal-production-core',
   maxClockSkewMs: 5 * 60 * 1000,
   nonceRetentionMs: 24 * 60 * 60 * 1000,
   secretPrefix: 'DEVICE_SECRET_',
@@ -118,7 +118,7 @@ function telemetry_(request) {
       mode_revision: directive.revision,
       command_id: directive.commandId
     };
-    if (commandsEnabled && terminalRow) {
+    if (approvalState === 'APPROVED' && terminalRow) {
       data.config_snapshot = buildConfigSnapshot_(request.device_id, {
         terminal: String(terminal.getRange(terminalRow, 2).getValue()),
         section: String(terminal.getRange(terminalRow, 3).getValue()),
@@ -363,7 +363,7 @@ function enroll_(request) {
       mode: registration.approvalState === 'APPROVED' ? safeMode_(registration.mode) : 'BLINDADO',
       mode_revision: registration.modeRevision
     };
-    if (registration.approvalState === 'APPROVED' && registration.commandsEnabled) {
+    if (registration.approvalState === 'APPROVED') {
       data.config_snapshot = buildConfigSnapshot_(request.device_id, registration);
     }
     audit_('INFO', 'ENROLL_OK', request.device_id + ' state=' + registration.approvalState);
@@ -596,23 +596,6 @@ function buildConfigSnapshot_(deviceId, registration) {
   });
   apps.sort(function (a, b) { return a.order - b.order || a.package_name.localeCompare(b.package_name); });
 
-  const settings = {};
-  const priorities = {};
-  sheet_(MDM.sheets.config).getDataRange().getValues().slice(1).forEach(function (row) {
-    const scope = String(row[1] || '').trim().toUpperCase();
-    const target = String(row[2] || '').trim();
-    const key = String(row[3] || '').trim().toUpperCase();
-    if (!key || key === 'PANEL_IT_PASSWORD') return;
-    let priority = 0;
-    if (scope === 'GLOBAL' && target === 'GLOBAL') priority = 1;
-    if (scope === 'PERFIL' && target === registration.profileId) priority = 2;
-    if (scope === 'TERMINAL' && target === deviceId) priority = 3;
-    if (priority && priority >= (priorities[key] || 0)) {
-      settings[key] = String(row[4] === null || row[4] === undefined ? '' : row[4]);
-      priorities[key] = priority;
-    }
-  });
-
   const snapshot = {
     schema_version: 1,
     complete: true,
@@ -623,7 +606,7 @@ function buildConfigSnapshot_(deviceId, registration) {
     section: registration.section,
     contacts: contacts,
     apps: apps,
-    settings: settings
+    settings: {}
   };
   const snapshotHash = sha256Hex_(canonicalJson_(snapshot));
   const devices = sheet_(MDM.sheets.devices);

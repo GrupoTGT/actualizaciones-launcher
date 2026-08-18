@@ -55,22 +55,34 @@ class MdmHeartbeatJobService : JobService() {
     }
 
     private fun applyAuthenticatedResponse(deviceId: String, response: MdmTelemetryResult) {
-        if (response.approvalState != "APPROVED" || !response.commandsEnabled) return
-        val before = ManagedModeStore.state(this)
-        if (!ManagedModeStore.acceptAuthenticated(this, response.mode, response.modeRevision)) {
-            AppLog.warning("MDM HEARTBEAT -> modo rechazado por revisión obsoleta o contradictoria")
-            return
-        }
+        if (response.approvalState != "APPROVED") return
+        val cache = MdmConfigCache(this)
+        val previousConfigRevision = cache.load().getOrNull()?.revision
+        var updatedConfigRevision = previousConfigRevision
         response.configSnapshot?.let { snapshot ->
-            MdmConfigCache(this).update(deviceId, snapshot).onFailure { error ->
-                AppLog.error("MDM HEARTBEAT -> snapshot rechazado: ${error.message}")
-            }
+            cache.update(deviceId, snapshot)
+                .onSuccess { updatedConfigRevision = it.revision }
+                .onFailure { error ->
+                    AppLog.error("MDM HEARTBEAT -> snapshot rechazado: ${error.message}")
+                }
         }
-        val modeChanged = before.desiredMode.wireValue != response.mode ||
-            before.desiredRevision != response.modeRevision ||
-            before.appliedMode.wireValue != response.mode ||
-            before.appliedRevision != response.modeRevision
-        if (modeChanged) {
+        val configChanged = updatedConfigRevision != null &&
+            updatedConfigRevision != previousConfigRevision
+        val modeChanged = if (response.commandsEnabled) {
+            val before = ManagedModeStore.state(this)
+            if (!ManagedModeStore.acceptAuthenticated(this, response.mode, response.modeRevision)) {
+                AppLog.warning("MDM HEARTBEAT -> modo rechazado por revisión obsoleta o contradictoria")
+                false
+            } else {
+                before.desiredMode.wireValue != response.mode ||
+                    before.desiredRevision != response.modeRevision ||
+                    before.appliedMode.wireValue != response.mode ||
+                    before.appliedRevision != response.modeRevision
+            }
+        } else {
+            false
+        }
+        if (modeChanged || configChanged) {
             val intent = Intent(this, MainActivity::class.java)
                 .setAction(MainActivity.ACTION_RECONCILE_MANAGED_MODE)
                 .putExtra(MainActivity.EXTRA_RECONCILE_MANAGED_MODE, true)
@@ -80,7 +92,10 @@ class MdmHeartbeatJobService : JobService() {
                 )
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             startActivity(intent)
-            AppLog.info("MDM HEARTBEAT -> reconciliación solicitada; command=${response.commandId}")
+            AppLog.info(
+                "MDM HEARTBEAT -> reconciliación solicitada; " +
+                    "command=${response.commandId}; configChanged=$configChanged"
+            )
         }
     }
 }

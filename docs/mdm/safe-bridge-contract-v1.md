@@ -4,7 +4,10 @@
 
 - Apps Script project: `1qv79yC0SqqdzguF0IOgym_wK8kCBM_-tdUFCn2ecXrNLDpZ6MlRifEc0`
 - Web App deployment: `AKfycby2-olpj2Y9wryLca77Jd5a01nROHf8C2XvyfU_wlk94DlAjR9mGE81uTwCPLj-x0E5`
-- Active deployment version: `11` (`3.1.0-mode-ack`).
+- Preserved rollback deployment: `21`
+  (`3.2.7-dashboard-complete-profile-counts`).
+- Active minimal production deployment: `22`
+  (`3.3.0-minimal-production-core`).
 - Endpoint: `https://script.google.com/macros/s/AKfycby2-olpj2Y9wryLca77Jd5a01nROHf8C2XvyfU_wlk94DlAjR9mGE81uTwCPLj-x0E5/exec`
 - Execution identity: deploying operator.
 - Access: public endpoint; application-level access is restricted by the signed
@@ -73,11 +76,12 @@ unknown mode values resolve to `BLINDADO`.
 
 ## Signed offline snapshot
 
-Approved devices with commands enabled receive a signed `config_snapshot` built
-from the canonical contact, profile-contact, app, profile-app and desired config
-tables. The snapshot includes the bound device ID, profile, terminal, section,
-contacts, call directions, permitted apps, inherited settings and a monotonic
-content revision. The Panel IT password is explicitly excluded.
+Approved devices receive a signed `config_snapshot` even while remote commands
+remain disabled. It is built only from canonical contacts, profile-contact
+relations, applications and profile-application relations. The snapshot includes
+the bound device ID, profile, terminal, section, contacts, call directions,
+permitted apps and a monotonic content revision. Remote settings and the Panel IT
+password are not included in this production core.
 
 Android validates structure, identity, uniqueness, package names, phone numbers,
 revision and SHA-256 before an atomic commit. Empty, corrupt, unsigned, stale or
@@ -96,6 +100,11 @@ stores an append-only snapshot in `_SB_TELEMETRY`, updates the current inventory
 and returns a signed acknowledgement. For approved devices it also returns the
 current signed mode/config directive. Android persists it and requests reconciliation
 even when `MainActivity` was not running.
+
+Configuration and command authorization are independent: disabling commands blocks
+managed-mode actions but does not stop signed agenda/application synchronization.
+Internal activity commands use a bounded multi-token queue, so consecutive actions
+cannot overwrite a pending reconciliation token.
 
 When an operator changes the visible managed mode, the bridge atomically increments
 the per-device revision and appends a `SET_MANAGED_MODE` entry to `_SB_COMMANDS`.

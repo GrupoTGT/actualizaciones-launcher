@@ -1276,19 +1276,21 @@ class MainActivity : AppCompatActivity() {
             cargarIdentificacionYLogo()
             MdmHeartbeatScheduler.schedule(this)
             MdmEnrollmentCoordinator.enroll(this, MdmBridgeConfig.ENDPOINT) { enrollment ->
-                if (enrollment.approvalState == "APPROVED" && enrollment.commandsEnabled) {
+                if (enrollment.approvalState == "APPROVED") {
                     runOnUiThread {
-                        val accepted = ManagedModeStore.acceptAuthenticated(
-                            this,
-                            enrollment.mode,
-                            enrollment.modeRevision
-                        )
-                        if (accepted) {
-                            reconciliarModoGestionado("SAFE BRIDGE rev=${enrollment.modeRevision}")
-                        } else {
-                            AppLog.warning(
-                                "MDM MODO -> orden rechazada por revisión obsoleta o contradictoria."
+                        if (enrollment.commandsEnabled) {
+                            val accepted = ManagedModeStore.acceptAuthenticated(
+                                this,
+                                enrollment.mode,
+                                enrollment.modeRevision
                             )
+                            if (accepted) {
+                                reconciliarModoGestionado("SAFE BRIDGE rev=${enrollment.modeRevision}")
+                            } else {
+                                AppLog.warning(
+                                    "MDM MODO -> orden rechazada por revisión obsoleta o contradictoria."
+                                )
+                            }
                         }
                         MdmConfigCache(this).load()
                             .onSuccess(::aplicarConfigCanonica)

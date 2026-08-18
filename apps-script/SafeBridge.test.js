@@ -114,6 +114,17 @@ function request(deviceId, timestamp = Date.now(), requestSecret = secret) {
   };
 }
 
+function telemetryRequest(deviceId, payload, timestamp = Date.now(), requestSecret = secret) {
+  const nonce = crypto.createHash('sha256').update(String(++nonceCounter)).digest('base64url').slice(0, 32);
+  const bodyHash = context.sha256Hex_(context.canonicalJson_(payload));
+  const canonical = ['1', 'telemetry', deviceId, String(timestamp), nonce, bodyHash].join('\n');
+  return {
+    contract_version: 1, action: 'telemetry', device_id: deviceId, timestamp_ms: timestamp,
+    nonce, payload, body_sha256: bodyHash,
+    signature: crypto.createHmac('sha256', requestSecret).update(canonical).digest('base64url')
+  };
+}
+
 const deviceId = 'device-test-1234';
 const firstRequest = request(deviceId);
 const first = context.enroll_(firstRequest);
@@ -131,10 +142,38 @@ assert.equal(sheets.get('_SB_DEVICES').getLastRow(), 2, 'repeated registration m
 sheets.get('_SB_DEVICES').set(2, 31, 'APPROVED');
 sheets.get('_SB_DEVICES').set(2, 33, false);
 sheets.get('1_TERMINALES').set(5, 4, 'PROFILE_SALA');
+sheets.get('2_AGENDA').set(6, 1, 'CONTACT_1');
+sheets.get('2_AGENDA').set(6, 2, 'IT');
+sheets.get('2_AGENDA').set(6, 3, '600000001');
+sheets.get('2_AGENDA').set(6, 5, 'ACTIVO');
+sheets.get('_MDM_CONTACT_PROFILE').set(2, 1, 'PROFILE_SALA');
+sheets.get('_MDM_CONTACT_PROFILE').set(2, 2, 'CONTACT_1');
+sheets.get('_MDM_CONTACT_PROFILE').set(2, 3, true);
+sheets.get('_MDM_CONTACT_PROFILE').set(2, 4, true);
+sheets.get('_MDM_CONTACT_PROFILE').set(2, 5, true);
+sheets.get('3_APLICACIONES').set(5, 1, 'APP_1');
+sheets.get('3_APLICACIONES').set(5, 2, 'Cámara');
+sheets.get('3_APLICACIONES').set(5, 3, 'com.sec.android.app.camera');
+sheets.get('3_APLICACIONES').set(5, 5, 'ACTIVO');
+sheets.get('_MDM_APP_PROFILE').set(2, 1, 'PROFILE_SALA');
+sheets.get('_MDM_APP_PROFILE').set(2, 2, 'APP_1');
+sheets.get('_MDM_APP_PROFILE').set(2, 3, true);
 const linked = context.enroll_(request(deviceId));
 assert.equal(linked.data.approval_state, 'APPROVED');
 assert.equal(linked.data.profile_id, 'PROFILE_SALA');
 assert.equal(linked.data.commands_enabled, false);
+assert.equal(linked.data.config_snapshot.contacts.length, 1);
+assert.equal(linked.data.config_snapshot.apps.length, 1);
+assert.equal(Object.keys(linked.data.config_snapshot.settings).length, 0);
+
+const heartbeatWithoutCommands = context.telemetry_(telemetryRequest(deviceId, {
+  app_version: '64.0 (64)', applied_mode: 'BLINDADO', applied_mode_revision: 0,
+  transition_phase: 'STABLE', last_error: 'SIN ERROR', configured_apps: [],
+  installed_configured_apps: []
+}));
+assert.equal(heartbeatWithoutCommands.data.commands_enabled, false);
+assert.equal(heartbeatWithoutCommands.data.config_snapshot.contacts.length, 1);
+assert.equal(heartbeatWithoutCommands.data.config_snapshot.apps.length, 1);
 
 sheets.get('_SB_DEVICES').set(2, 33, true);
 sheets.get('1_TERMINALES').set(5, 5, 'LIBRE GESTIONADO');

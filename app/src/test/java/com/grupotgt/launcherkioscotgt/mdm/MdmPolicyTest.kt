@@ -74,6 +74,15 @@ class MdmPolicyTest {
         assertFalse(MdmTransportPolicy.shouldRetry(IllegalStateException("invalid signature")))
     }
 
+    @Test
+    fun managedHttpClientUsesBoundedAppsScriptTimeouts() {
+        val client = MdmHttpClientFactory.create()
+        assertEquals(15_000, client.connectTimeoutMillis)
+        assertEquals(20_000, client.writeTimeoutMillis)
+        assertEquals(60_000, client.readTimeoutMillis)
+        assertEquals(75_000, client.callTimeoutMillis)
+    }
+
     private inline fun <reified T : Throwable> assertThrows(noinline block: () -> Unit) {
         org.junit.Assert.assertThrows(T::class.java, block)
     }

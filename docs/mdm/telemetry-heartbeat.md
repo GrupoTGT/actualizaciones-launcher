@@ -9,8 +9,9 @@
 - Authentication: device-specific HMAC-SHA256 credential stored encrypted with
   Android Keystore, timestamp window, one-use nonce, canonical body SHA-256 and
   signed server acknowledgement.
-- The heartbeat never changes managed mode, HOME, LockTask, Device Owner,
-  configuration, OTA state or command state.
+- The heartbeat never changes HOME, LockTask, Device Owner or OTA state directly.
+  It may persist a signed agenda/application snapshot and request idempotent launcher
+  reconciliation. Managed-mode directives are accepted only when commands are enabled.
 
 ## Measured data
 
@@ -26,12 +27,14 @@ values are never converted into an affirmative state.
 
 ## Server storage
 
-The active SAFE BRIDGE deployment version is 11 (`3.1.0-mode-ack`). It updates the latest state in
+The active minimal production deployment is version `22`, service
+`3.3.0-minimal-production-core`. It updates the latest state in
 `_SB_DEVICES` and `1_TERMINALES`, appends normalized records to `_SB_TELEMETRY`,
 and records only a compact success/error audit entry. Secrets and raw signed
 requests are not written to spreadsheet cells or logs.
 
-Approved heartbeat responses carry the current mode revision, optional canonical
-snapshot and command identity. A changed directive is persisted before Android
-opens the launcher for idempotent reconciliation. The next measured heartbeat is
-the ACK; receipt alone never closes the command.
+Approved heartbeat responses carry a canonical agenda/application snapshot even
+with commands disabled. When commands are enabled they may additionally carry the
+current mode revision and command identity. A changed snapshot or directive is
+persisted before Android opens the launcher for idempotent reconciliation. The next
+measured heartbeat is the mode ACK; receipt alone never closes a command.
