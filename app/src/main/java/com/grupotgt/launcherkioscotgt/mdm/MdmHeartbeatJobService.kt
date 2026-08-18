@@ -8,6 +8,7 @@ import android.app.job.JobService
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import com.grupotgt.launcherkioscotgt.AppLog
 import com.grupotgt.launcherkioscotgt.MainActivity
 import okhttp3.Call
@@ -82,6 +83,13 @@ class MdmHeartbeatJobService : JobService() {
         } else {
             false
         }
+        val pilotOta = response.pilotOtaAssignment?.let { assignmentJson ->
+            MdmPilotOtaStore.update(this, deviceId, assignmentJson)
+                .onFailure { error ->
+                    AppLog.error("MDM HEARTBEAT -> asignación OTA piloto rechazada: ${error.message}")
+                }
+                .getOrNull()
+        }
         if (modeChanged || configChanged) {
             val intent = Intent(this, MainActivity::class.java)
                 .setAction(MainActivity.ACTION_RECONCILE_MANAGED_MODE)
@@ -96,6 +104,36 @@ class MdmHeartbeatJobService : JobService() {
                 "MDM HEARTBEAT -> reconciliación solicitada; " +
                     "command=${response.commandId}; configChanged=$configChanged"
             )
+        }
+        if (pilotOta != null) {
+            val currentVersion = currentVersionCode()
+            if (pilotOta.isEligible(currentVersion, System.currentTimeMillis())) {
+                val intent = Intent(this, MainActivity::class.java)
+                    .setAction(MainActivity.ACTION_APPLY_PILOT_OTA)
+                    .putExtra(MainActivity.EXTRA_APPLY_PILOT_OTA, true)
+                    .putExtra(
+                        MainActivity.EXTRA_INTERNAL_COMMAND_TOKEN,
+                        InternalCommandGate.issue(this, InternalCommandGate.ACTION_APPLY_PILOT_OTA)
+                    )
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                startActivity(intent)
+                AppLog.info(
+                    "MDM HEARTBEAT -> OTA piloto autenticada solicitada; " +
+                        "assignment=${pilotOta.assignmentId}; target=${pilotOta.versionCode}"
+                )
+            } else if (pilotOta.versionCode.toLong() <= currentVersion) {
+                MdmPilotOtaStore.clear(this)
+            }
+        }
+    }
+
+    private fun currentVersionCode(): Long {
+        val packageInfo = packageManager.getPackageInfo(packageName, 0)
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            packageInfo.longVersionCode
+        } else {
+            @Suppress("DEPRECATION")
+            packageInfo.versionCode.toLong()
         }
     }
 }

@@ -19,6 +19,9 @@
 | VoWiFi not verifiable | Network test requires the honest `NO VERIFICABLE` value. |
 | Android/Apps Script canonical parity | Both suites enforce the same Unicode/control/slash canonical JSON, SHA-256 and HMAC golden vector. |
 | Consecutive internal actions | `InternalCommandGateTest` issues two tokens consecutively, consumes them independently and proves an invalid or expired token cannot replace `RECONCILE_MANAGED_MODE`. |
+| Device-scoped pilot OTA | Bridge tests assign V65 to one exact device while commands are disabled; another device receives no assignment. |
+| Pilot descriptor validation | JVM tests reject a mismatched device, untrusted host and expired assignment before download. |
+| Pilot APK integrity | Production code verifies byte length, SHA-256, package, higher version and signing certificate before PackageInstaller; final execution remains a physical pilot check. |
 
 The JVM suite does not claim physical validation. JobScheduler execution, Android
 permissions, Device Owner, LockTask, HOME transitions, calls and offline behavior

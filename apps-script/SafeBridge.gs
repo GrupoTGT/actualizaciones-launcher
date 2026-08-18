@@ -3,7 +3,7 @@
 const MDM = Object.freeze({
   spreadsheetId: '1MhpLIjGF2ZOliUO_Bske_oZ8Zcq-2rTLNiI3rSIj1nw',
   contractVersion: 1,
-  serviceVersion: '3.3.0-minimal-production-core',
+  serviceVersion: '3.4.0-device-scoped-pilot-ota',
   maxClockSkewMs: 5 * 60 * 1000,
   nonceRetentionMs: 24 * 60 * 60 * 1000,
   secretPrefix: 'DEVICE_SECRET_',
@@ -19,7 +19,8 @@ const MDM = Object.freeze({
     contactProfiles: '_MDM_CONTACT_PROFILE',
     apps: '3_APLICACIONES',
     appProfiles: '_MDM_APP_PROFILE',
-    config: '_MDM_CONFIG_DESIRED'
+    config: '_MDM_CONFIG_DESIRED',
+    otaAssignments: '_SB_OTA_ASSIGNMENTS'
   })
 });
 
@@ -126,11 +127,63 @@ function telemetry_(request) {
         configRevision: Math.max(0, Number(devices.getRange(deviceRow, 37).getValue()) || 0),
         deviceRow: deviceRow
       });
+      const pilotOta = resolvePilotOtaAssignment_(request.device_id, now);
+      if (pilotOta) data.pilot_ota = pilotOta;
     }
     return signedResponse_(request.device_id, request.nonce, data, secret);
   } finally {
     lock.releaseLock();
   }
+}
+
+function resolvePilotOtaAssignment_(deviceId, now) {
+  const sheet = sheet_(MDM.sheets.otaAssignments);
+  const headers = [
+    'assignment_id', 'device_id', 'status', 'version_code', 'version_name',
+    'apk_url', 'sha256', 'size_bytes', 'issued_at', 'expires_at',
+    'last_delivered_at', 'delivery_count', 'last_error'
+  ];
+  ensureHeader_(sheet, headers);
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return null;
+  const rows = sheet.getRange(2, 1, lastRow - 1, headers.length).getValues();
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    const row = rows[index];
+    if (String(row[1]) !== deviceId || String(row[2]).trim().toUpperCase() !== 'ACTIVE') continue;
+    const sheetRow = index + 2;
+    const assignmentId = String(row[0] || '').trim();
+    const versionCode = Math.floor(Number(row[3]));
+    const versionName = String(row[4] || '').trim();
+    const apkUrl = String(row[5] || '').trim();
+    const sha256 = String(row[6] || '').trim().toLowerCase();
+    const sizeBytes = Math.floor(Number(row[7]));
+    const expiresAt = row[9] instanceof Date ? row[9].getTime() : new Date(row[9]).getTime();
+    const valid = /^[A-Za-z0-9._-]{8,100}$/.test(assignmentId) &&
+      Number.isFinite(versionCode) && versionCode > 0 && versionName.length > 0 &&
+      /^https:\/\/github\.com\/GrupoTGT\/actualizaciones-launcher\/releases\/download\/[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+\.apk$/.test(apkUrl) &&
+      /^[0-9a-f]{64}$/.test(sha256) && Number.isFinite(sizeBytes) && sizeBytes > 0 &&
+      Number.isFinite(expiresAt) && expiresAt > now.getTime();
+    if (!valid) {
+      sheet.getRange(sheetRow, 13).setValue('INVALID_OR_EXPIRED_ASSIGNMENT');
+      audit_('WARNING', 'PILOT_OTA_REJECTED', deviceId + ' assignment=' + assignmentId);
+      return null;
+    }
+    sheet.getRange(sheetRow, 11).setValue(now);
+    sheet.getRange(sheetRow, 12).setValue(Math.max(0, Number(row[11]) || 0) + 1);
+    sheet.getRange(sheetRow, 13).setValue('');
+    audit_('INFO', 'PILOT_OTA_DELIVERED', deviceId + ' assignment=' + assignmentId);
+    return {
+      assignment_id: assignmentId,
+      device_id: deviceId,
+      version_code: versionCode,
+      version_name: versionName,
+      apk_url: apkUrl,
+      sha256: sha256,
+      size_bytes: sizeBytes,
+      expires_at_ms: expiresAt
+    };
+  }
+  return null;
 }
 
 function normalizedTelemetry_(payload) {

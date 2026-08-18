@@ -18,16 +18,23 @@ modo robo, localización, borrado remoto y cualquier OTA general.
 - `versionCode`: `65`
 - `versionName`: `65.0-pilot`
 - APK: `LauncherKioscoTGT-v65.0-pilot.apk`
-- SHA-256: `18AA7FF37F96E961F234E6AC71E408DBF4C7F95CC8465D742E0CFCA02C9F1F68`
+- SHA-256: `A94FC101D169EAD0BFF13877C528530CB868D4F88B847C923DEFE0343D9C5BA5`
+- Tamaño: `6630440` bytes
 - Certificado SHA-256: `7f92a9d9930d4e6ae633bdee8a0cedc18b6d213ea96200ab98ca67f22ed54751`
 
 ## SAFE Bridge
 
-- Deployment: `22`
-- Servicio: `3.3.0-minimal-production-core`
+- Deployment: `23`
+- Servicio: `3.4.0-device-scoped-pilot-ota`
 - Contrato: `1`
 - Sala 3: `APPROVED`, `commands_enabled=FALSE`, modo deseado y aplicado
   `BLINDADO` antes de activar la prueba.
+
+La asignación OTA piloto viaja dentro de la respuesta HMAC del heartbeat y
+queda ligada al `device_id`, versión, URL, SHA-256, tamaño y caducidad. Una
+asignación para Sala 3 no se entrega a ningún otro identificador. El APK
+comprueba además hash, tamaño, package, versión superior y certificado antes
+de abrir la sesión de PackageInstaller.
 
 ## Rollback preparado
 
@@ -44,7 +51,7 @@ el canal estable ni se instala salvo fallo acreditado de Sala 3.
 ## Validación previa
 
 - SAFE Bridge: `SAFE_BRIDGE_TESTS_OK`.
-- JVM: 22 pruebas, 0 fallos.
+- JVM: 23 pruebas, 0 fallos.
 - Build V65: `BUILD SUCCESSFUL`.
 - Lint: 0 errores, 236 avisos.
 - Permisos: 22 en V64 y V65, diferencia 0.

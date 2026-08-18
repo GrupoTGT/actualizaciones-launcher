@@ -27,8 +27,8 @@ values are never converted into an affirmative state.
 
 ## Server storage
 
-The active minimal production deployment is version `22`, service
-`3.3.0-minimal-production-core`. It updates the latest state in
+The active device-scoped pilot deployment is version `23`, service
+`3.4.0-device-scoped-pilot-ota`. It updates the latest state in
 `_SB_DEVICES` and `1_TERMINALES`, appends normalized records to `_SB_TELEMETRY`,
 and records only a compact success/error audit entry. Secrets and raw signed
 requests are not written to spreadsheet cells or logs.
@@ -38,3 +38,8 @@ with commands disabled. When commands are enabled they may additionally carry th
 current mode revision and command identity. A changed snapshot or directive is
 persisted before Android opens the launcher for idempotent reconciliation. The next
 measured heartbeat is the mode ACK; receipt alone never closes a command.
+
+The V65 pilot extension `3.4.0-device-scoped-pilot-ota` may additionally return
+one HMAC-protected `pilot_ota` object for the exact approved `device_id`. The
+heartbeat persists only a valid, unexpired assignment and requests the internal
+one-use `APPLY_PILOT_OTA` action. No matching row means no OTA action.

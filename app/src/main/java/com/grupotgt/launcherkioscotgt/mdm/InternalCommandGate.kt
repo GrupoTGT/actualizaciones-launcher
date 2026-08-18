@@ -49,6 +49,7 @@ internal object InternalCommandGate {
     const val ACTION_START_MAINTENANCE = "START_MAINTENANCE"
     const val ACTION_FINISH_MAINTENANCE = "FINISH_MAINTENANCE"
     const val ACTION_FORCE_OTA = "FORCE_OTA"
+    const val ACTION_APPLY_PILOT_OTA = "APPLY_PILOT_OTA"
     const val ACTION_RECONCILE_MANAGED_MODE = "RECONCILE_MANAGED_MODE"
 
     @Synchronized
@@ -117,6 +118,7 @@ internal object InternalCommandGate {
         ACTION_START_MAINTENANCE,
         ACTION_FINISH_MAINTENANCE,
         ACTION_FORCE_OTA,
+        ACTION_APPLY_PILOT_OTA,
         ACTION_RECONCILE_MANAGED_MODE
     )
 

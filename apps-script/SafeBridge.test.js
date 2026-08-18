@@ -50,6 +50,7 @@ class Sheet {
 const sheets = new Map([
   '1_TERMINALES', '_SB_DEVICES', '_SB_NONCES', '_SB_AUDIT', '_SB_TELEMETRY',
   '_SB_COMMANDS', '_SB_ACKS',
+  '_SB_OTA_ASSIGNMENTS',
   '2_AGENDA', '_MDM_CONTACT_PROFILE', '3_APLICACIONES', '_MDM_APP_PROFILE', '_MDM_CONFIG_DESIRED'
 ].map(name => [name, new Sheet(name)]));
 for (let row = 1; row <= 4; row += 1) sheets.get('1_TERMINALES').set(row, 1, row === 1 ? 'device_id' : '');
@@ -166,6 +167,18 @@ assert.equal(linked.data.config_snapshot.contacts.length, 1);
 assert.equal(linked.data.config_snapshot.apps.length, 1);
 assert.equal(Object.keys(linked.data.config_snapshot.settings).length, 0);
 
+sheets.get('_SB_OTA_ASSIGNMENTS').appendRow([
+  'assignment_id', 'device_id', 'status', 'version_code', 'version_name',
+  'apk_url', 'sha256', 'size_bytes', 'issued_at', 'expires_at',
+  'last_delivered_at', 'delivery_count', 'last_error'
+]);
+sheets.get('_SB_OTA_ASSIGNMENTS').appendRow([
+  'SALA3-V65-PILOT', deviceId, 'ACTIVE', 65, '65.0-pilot',
+  'https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/' +
+    'v65.0-pilot/LauncherKioscoTGT-v65.0-pilot.apk',
+  'a'.repeat(64), 6630440, new Date(), new Date(Date.now() + 60 * 60 * 1000), '', 0, ''
+]);
+
 const heartbeatWithoutCommands = context.telemetry_(telemetryRequest(deviceId, {
   app_version: '64.0 (64)', applied_mode: 'BLINDADO', applied_mode_revision: 0,
   transition_phase: 'STABLE', last_error: 'SIN ERROR', configured_apps: [],
@@ -174,6 +187,9 @@ const heartbeatWithoutCommands = context.telemetry_(telemetryRequest(deviceId, {
 assert.equal(heartbeatWithoutCommands.data.commands_enabled, false);
 assert.equal(heartbeatWithoutCommands.data.config_snapshot.contacts.length, 1);
 assert.equal(heartbeatWithoutCommands.data.config_snapshot.apps.length, 1);
+assert.equal(heartbeatWithoutCommands.data.pilot_ota.device_id, deviceId);
+assert.equal(heartbeatWithoutCommands.data.pilot_ota.version_code, 65);
+assert.equal(context.resolvePilotOtaAssignment_('another-device', new Date()), null);
 
 sheets.get('_SB_DEVICES').set(2, 33, true);
 sheets.get('1_TERMINALES').set(5, 5, 'LIBRE GESTIONADO');

@@ -6,8 +6,10 @@
 - Web App deployment: `AKfycby2-olpj2Y9wryLca77Jd5a01nROHf8C2XvyfU_wlk94DlAjR9mGE81uTwCPLj-x0E5`
 - Preserved rollback deployment: `21`
   (`3.2.7-dashboard-complete-profile-counts`).
-- Active minimal production deployment: `22`
+- Preserved minimal production deployment: `22`
   (`3.3.0-minimal-production-core`).
+- Active device-scoped pilot OTA deployment: `23`
+  (`3.4.0-device-scoped-pilot-ota`).
 - Endpoint: `https://script.google.com/macros/s/AKfycby2-olpj2Y9wryLca77Jd5a01nROHf8C2XvyfU_wlk94DlAjR9mGE81uTwCPLj-x0E5/exec`
 - Execution identity: deploying operator.
 - Access: public endpoint; application-level access is restricted by the signed
@@ -73,6 +75,20 @@ unknown mode values resolve to `BLINDADO`.
 - Missing, empty or unknown mode means `BLINDADO`.
 - Pending devices receive `PENDIENTE_SEGURO` and commands disabled.
 - Enrollment never publishes OTA metadata and never touches Device Owner.
+
+## Device-scoped pilot OTA
+
+An approved terminal may receive `data.pilot_ota` only when `_SB_OTA_ASSIGNMENTS`
+contains an unexpired `ACTIVE` row for its exact `device_id`. The signed object
+contains `assignment_id`, `device_id`, `version_code`, `version_name`, `apk_url`,
+`sha256`, `size_bytes` and `expires_at_ms`. It is delivered independently of
+`commands_enabled`, but never to pending or unknown devices.
+
+The allowed URL is restricted to release APK assets below
+`https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/`.
+Android revalidates device binding, expiry, higher version, byte length, SHA-256,
+package and signing certificate before PackageInstaller is invoked. Absence of an
+exact assignment means `NO_UPDATE`; the public stable descriptor remains V64.
 
 ## Signed offline snapshot
 

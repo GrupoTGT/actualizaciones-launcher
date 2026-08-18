@@ -16,7 +16,8 @@ internal data class MdmTelemetryResult(
     val mode: String,
     val modeRevision: Long,
     val commandId: String,
-    val configSnapshot: JSONObject?
+    val configSnapshot: JSONObject?,
+    val pilotOtaAssignment: JSONObject?
 )
 
 internal data class MdmPreparedTelemetry(
@@ -102,7 +103,8 @@ internal class MdmTelemetryClient(
             mode = ManagedMode.parse(data?.optString("mode")).wireValue,
             modeRevision = data?.optLong("mode_revision", -1L) ?: -1L,
             commandId = data?.optString("command_id").orEmpty(),
-            configSnapshot = data?.optJSONObject("config_snapshot")
+            configSnapshot = data?.optJSONObject("config_snapshot"),
+            pilotOtaAssignment = data?.optJSONObject("pilot_ota")
         )
     }
 

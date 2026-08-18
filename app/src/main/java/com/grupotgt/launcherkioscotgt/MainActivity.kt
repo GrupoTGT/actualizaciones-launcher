@@ -13,6 +13,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.res.ColorStateList
 import android.content.pm.PackageInstaller
+import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
@@ -63,6 +64,7 @@ import com.grupotgt.launcherkioscotgt.mdm.MdmConfigCache
 import com.grupotgt.launcherkioscotgt.mdm.MdmConfigSnapshot
 import com.grupotgt.launcherkioscotgt.mdm.MdmEnrollmentCoordinator
 import com.grupotgt.launcherkioscotgt.mdm.MdmHeartbeatScheduler
+import com.grupotgt.launcherkioscotgt.mdm.MdmPilotOtaStore
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.OkHttpClient
@@ -73,6 +75,7 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
+import java.security.MessageDigest
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -997,7 +1000,9 @@ class MainActivity : AppCompatActivity() {
         const val EXTRA_FINALIZAR_MANTENIMIENTO = "com.grupotgt.launcherkioscotgt.EXTRA_FINALIZAR_MANTENIMIENTO"
         const val EXTRA_INTERNAL_COMMAND_TOKEN = "com.grupotgt.launcherkioscotgt.EXTRA_INTERNAL_COMMAND_TOKEN"
         const val EXTRA_RECONCILE_MANAGED_MODE = "com.grupotgt.launcherkioscotgt.EXTRA_RECONCILE_MANAGED_MODE"
+        const val EXTRA_APPLY_PILOT_OTA = "com.grupotgt.launcherkioscotgt.EXTRA_APPLY_PILOT_OTA"
         const val ACTION_RECONCILE_MANAGED_MODE = "com.grupotgt.launcherkioscotgt.action.RECONCILE_MANAGED_MODE"
+        const val ACTION_APPLY_PILOT_OTA = "com.grupotgt.launcherkioscotgt.action.APPLY_PILOT_OTA"
     }
 
     private val URL_GOOGLE_SHEETS_CSV = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSye0TO9CYH8xXSPy-rCNDOO4UjiNdmp32SiOWLwxsUPI25ZW9rHW44JlAPn38_4vVpJK5Pw6tu5Ct0/pub?output=csv"
@@ -1300,12 +1305,19 @@ class MainActivity : AppCompatActivity() {
             cargarAgendaDesdeCache()
             descargarAgendaNube(modoSilencioso = true)
 
+            val otaPilotoAutenticada = consumirComandoInterno(
+                intent,
+                EXTRA_APPLY_PILOT_OTA,
+                InternalCommandGate.ACTION_APPLY_PILOT_OTA
+            )
             val otaForzadaDesdePanel = consumirComandoInterno(
                 intent,
                 EXTRA_FORZAR_OTA,
                 InternalCommandGate.ACTION_FORCE_OTA
             )
-            if (otaForzadaDesdePanel) {
+            if (otaPilotoAutenticada) {
+                comprobarActualizacionPiloto()
+            } else if (otaForzadaDesdePanel) {
                 AppLog.ota("OTA manual solicitada desde Panel IT. Ejecutando motor OTA único.")
                 comprobarActualizacionOTA(forzada = true)
             } else {
@@ -1370,6 +1382,17 @@ class MainActivity : AppCompatActivity() {
             ) return
             reconciliarModoGestionado("heartbeat firmado")
             MdmConfigCache(this).load().onSuccess(::aplicarConfigCanonica)
+            return
+        }
+
+        if (intent.action == ACTION_APPLY_PILOT_OTA) {
+            if (!consumirComandoInterno(
+                    intent,
+                    EXTRA_APPLY_PILOT_OTA,
+                    InternalCommandGate.ACTION_APPLY_PILOT_OTA
+                )
+            ) return
+            comprobarActualizacionPiloto()
             return
         }
 
@@ -3691,7 +3714,48 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
-    private fun descargarYInstalarAPK(url: String, versionEsperada: Int) {
+    private fun comprobarActualizacionPiloto() {
+        val deviceId = MdmConfigCache(this).currentDeviceId()
+        val assignment = MdmPilotOtaStore.load(this, deviceId)
+            .onFailure { error -> AppLog.error("OTA PILOTO -> asignación no disponible: ${error.message}") }
+            .getOrNull() ?: return
+        val packageInfo = packageManager.getPackageInfo(packageName, 0)
+        val currentVersion = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            packageInfo.longVersionCode
+        } else {
+            @Suppress("DEPRECATION")
+            packageInfo.versionCode.toLong()
+        }
+        if (!assignment.isEligible(currentVersion, System.currentTimeMillis())) {
+            if (assignment.versionCode.toLong() <= currentVersion) MdmPilotOtaStore.clear(this)
+            AppLog.info(
+                "OTA PILOTO -> sin actualización aplicable; local=$currentVersion " +
+                    "target=${assignment.versionCode}"
+            )
+            return
+        }
+        if (!OtaRuntimeState.intentarIniciar(assignment.versionCode)) {
+            AppLog.warning("OTA PILOTO -> otra actualización ya está en curso")
+            return
+        }
+        AppLog.ota(
+            "OTA PILOTO AUTENTICADA -> assignment=${assignment.assignmentId}; " +
+                "local=$currentVersion; target=${assignment.versionCode}"
+        )
+        descargarYInstalarAPK(
+            assignment.apkUrl,
+            assignment.versionCode,
+            assignment.sha256,
+            assignment.sizeBytes
+        )
+    }
+
+    private fun descargarYInstalarAPK(
+        url: String,
+        versionEsperada: Int,
+        sha256Esperado: String? = null,
+        bytesEsperados: Long? = null
+    ) {
         mostrarPantallaOTA()
 
         val client = OkHttpClient.Builder()
@@ -3786,12 +3850,12 @@ class MainActivity : AppCompatActivity() {
                         true
                     )
 
-                    if (!validarApkDescargado(file, versionEsperada)) {
+                    if (!validarApkDescargado(file, versionEsperada, sha256Esperado, bytesEsperados)) {
                         OtaRuntimeState.finalizar()
                         try { file.delete() } catch (_: Exception) {}
                         actualizarProgresoOTA(
                             0,
-                            "❌ APK rechazada: paquete o versión incorrectos.",
+                            "❌ APK rechazada: identidad o integridad incorrectas.",
                             false
                         )
                         handler.postDelayed({
@@ -3823,16 +3887,44 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
-    private fun validarApkDescargado(apkFile: File, versionEsperada: Int): Boolean {
+    private fun validarApkDescargado(
+        apkFile: File,
+        versionEsperada: Int,
+        sha256Esperado: String? = null,
+        bytesEsperados: Long? = null
+    ): Boolean {
         return try {
+            if (bytesEsperados != null && bytesEsperados > 0L && apkFile.length() != bytesEsperados) {
+                AppLog.error(
+                    "OTA RECHAZADA -> tamaño incorrecto. Esperado=$bytesEsperados Recibido=${apkFile.length()}"
+                )
+                return false
+            }
+            if (!sha256Esperado.isNullOrBlank()) {
+                val recibido = sha256Archivo(apkFile)
+                if (!MessageDigest.isEqual(
+                        sha256Esperado.lowercase(Locale.US).toByteArray(),
+                        recibido.toByteArray()
+                    )
+                ) {
+                    AppLog.error("OTA RECHAZADA -> SHA-256 no coincide con la asignación firmada")
+                    return false
+                }
+            }
+            val signingFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                PackageManager.GET_SIGNING_CERTIFICATES
+            } else {
+                @Suppress("DEPRECATION")
+                PackageManager.GET_SIGNATURES
+            }
             val packageInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 packageManager.getPackageArchiveInfo(
                     apkFile.absolutePath,
-                    PackageManager.PackageInfoFlags.of(0L)
+                    PackageManager.PackageInfoFlags.of(signingFlags.toLong())
                 )
             } else {
                 @Suppress("DEPRECATION")
-                packageManager.getPackageArchiveInfo(apkFile.absolutePath, 0)
+                packageManager.getPackageArchiveInfo(apkFile.absolutePath, signingFlags)
             }
 
             if (packageInfo == null) {
@@ -3848,7 +3940,15 @@ class MainActivity : AppCompatActivity() {
                 packageInfo.versionCode.toLong()
             }
 
-            val instalada = packageManager.getPackageInfo(packageName, 0)
+            val instalada = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                packageManager.getPackageInfo(
+                    packageName,
+                    PackageManager.PackageInfoFlags.of(signingFlags.toLong())
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                packageManager.getPackageInfo(packageName, signingFlags)
+            }
             val versionLocal = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 instalada.longVersionCode
             } else {
@@ -3880,6 +3980,10 @@ class MainActivity : AppCompatActivity() {
                     )
                     false
                 }
+                certificadosSha256(packageInfo) != certificadosSha256(instalada) -> {
+                    AppLog.error("OTA RECHAZADA -> certificado de firma incompatible")
+                    false
+                }
                 else -> {
                     AppLog.success(
                         "OTA VALIDACIÓN OK -> package y versionCode correctos. Preparada para PackageInstaller."
@@ -3893,6 +3997,33 @@ class MainActivity : AppCompatActivity() {
             )
             false
         }
+    }
+
+    private fun sha256Archivo(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buffer = ByteArray(32 * 1024)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                digest.update(buffer, 0, count)
+            }
+        }
+        return digest.digest().joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
+    }
+
+    private fun certificadosSha256(packageInfo: PackageInfo): Set<String> {
+        val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            packageInfo.signingInfo?.apkContentsSigners.orEmpty()
+        } else {
+            @Suppress("DEPRECATION")
+            packageInfo.signatures.orEmpty()
+        }
+        return signatures.map { signature ->
+            MessageDigest.getInstance("SHA-256")
+                .digest(signature.toByteArray())
+                .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
+        }.toSet()
     }
 
     private fun instalarApkSilenciosa(apkFile: File) {

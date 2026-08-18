@@ -83,6 +83,40 @@ class MdmPolicyTest {
         assertEquals(75_000, client.callTimeoutMillis)
     }
 
+    @Test
+    fun pilotOtaAssignmentIsBoundToDeviceHostDigestSizeAndExpiry() {
+        val now = 10_000L
+        val valid = JSONObject()
+            .put("assignment_id", "SALA3-V65-PILOT")
+            .put("device_id", "device-sala-3")
+            .put("version_code", 65)
+            .put("version_name", "65.0-pilot")
+            .put(
+                "apk_url",
+                "https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/" +
+                    "v65.0-pilot/LauncherKioscoTGT-v65.0-pilot.apk"
+            )
+            .put("sha256", "a".repeat(64))
+            .put("size_bytes", 6_630_440L)
+            .put("expires_at_ms", now + 60_000L)
+        val assignment = MdmPilotOtaAssignment.parse("device-sala-3", valid, now)
+        assertTrue(assignment.isEligible(64L, now))
+        assertFalse(assignment.isEligible(65L, now))
+        assertThrows<IllegalArgumentException> {
+            MdmPilotOtaAssignment.parse("another-device", valid, now)
+        }
+        assertThrows<IllegalArgumentException> {
+            MdmPilotOtaAssignment.parse(
+                "device-sala-3",
+                JSONObject(valid.toString()).put("apk_url", "https://example.com/update.apk"),
+                now
+            )
+        }
+        assertThrows<IllegalArgumentException> {
+            MdmPilotOtaAssignment.parse("device-sala-3", valid, now + 60_001L)
+        }
+    }
+
     private inline fun <reified T : Throwable> assertThrows(noinline block: () -> Unit) {
         org.junit.Assert.assertThrows(T::class.java, block)
     }

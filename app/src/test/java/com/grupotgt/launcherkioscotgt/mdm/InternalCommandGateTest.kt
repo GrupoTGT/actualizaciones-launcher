@@ -19,7 +19,7 @@ class InternalCommandGateTest {
         )
         queue = InternalCommandTokenQueue.issue(
             queue,
-            InternalCommandGate.ACTION_FORCE_OTA,
+            InternalCommandGate.ACTION_APPLY_PILOT_OTA,
             otaHash,
             now + 30_000L,
             now
@@ -27,7 +27,7 @@ class InternalCommandGateTest {
 
         val ota = InternalCommandTokenQueue.consume(
             queue,
-            InternalCommandGate.ACTION_FORCE_OTA,
+            InternalCommandGate.ACTION_APPLY_PILOT_OTA,
             otaHash,
             now + 1L
         )
