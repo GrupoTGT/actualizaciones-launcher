@@ -1,8 +1,8 @@
 {
   "package": "com.grupotgt.launcherkioscotgt",
-  "versionCode": 83,
-  "versionName": "83.0-secure-communications",
-  "apkUrl": "https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/v83.0/LauncherKioscoTGT-v83.0.apk",
-  "sizeBytes": 6688880,
-  "sha256": "a8fa17ef141b53b3e0812b8a9628c18b70e06e98c629a1d4c9e53718683ec081"
+  "versionCode": 81,
+  "versionName": "81.0-fleet-enrollment-job",
+  "apkUrl": "https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/v81.0/LauncherKioscoTGT-v81.0.apk",
+  "sizeBytes": 6679492,
+  "sha256": "0199eeb97548d88d16993171cc15802954c563ddde6691cf45ef526c772a894b"
 }
