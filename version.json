@@ -1,8 +1,8 @@
 {
   "package": "com.grupotgt.launcherkioscotgt",
-  "versionCode": 81,
-  "versionName": "81.0-fleet-enrollment-job",
-  "apkUrl": "https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/v81.0/LauncherKioscoTGT-v81.0.apk",
-  "sizeBytes": 6679492,
-  "sha256": "0199eeb97548d88d16993171cc15802954c563ddde6691cf45ef526c772a894b"
+  "versionCode": 85,
+  "versionName": "85.0-secure-it-bootstrap",
+  "apkUrl": "https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/v85.0/LauncherKioscoTGT-v85.0.apk",
+  "sizeBytes": 6697032,
+  "sha256": "59e4a527ecddd1b2f29b3fa412513dfc6e3fa83a6d292a771bd66a93bc5ae7c2"
 }
