@@ -1,8 +1,8 @@
 {
   "package": "com.grupotgt.launcherkioscotgt",
-  "versionCode": 93,
-  "versionName": "93.0-it-password-reliability",
-  "apkUrl": "https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/v93.0/LauncherKioscoTGT-v93.0.apk",
+  "versionCode": 94,
+  "versionName": "94.0-password-panel-fix",
+  "apkUrl": "https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/v94.0/LauncherKioscoTGT-v94.0.apk",
   "sizeBytes": 9276954,
-  "sha256": "ce056bcbbf2f858c0ab0a18db763a15a16f7c2b64b8bb9d52d105f529950bd53"
+  "sha256": "98ef6d76c41c315892085cd55b1d42cd4735b91d817cb454655442b5c82f8498"
 }
