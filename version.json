@@ -1,8 +1,8 @@
 {
   "package": "com.grupotgt.launcherkioscotgt",
-  "versionCode": 85,
-  "versionName": "85.0-secure-it-bootstrap",
-  "apkUrl": "https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/v85.0/LauncherKioscoTGT-v85.0.apk",
-  "sizeBytes": 6697032,
-  "sha256": "59e4a527ecddd1b2f29b3fa412513dfc6e3fa83a6d292a771bd66a93bc5ae7c2"
+  "versionCode": 86,
+  "versionName": "86.0-global-call-allowlist",
+  "apkUrl": "https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/v86.0/LauncherKioscoTGT-v86.0.apk",
+  "sizeBytes": 6710408,
+  "sha256": "38daef5510debb66469911a8651acbeec34163f9fc31b4ffe4c1e7ed0fa78ae1"
 }
