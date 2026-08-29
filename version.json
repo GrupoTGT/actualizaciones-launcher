@@ -1,8 +1,8 @@
 {
   "package": "com.grupotgt.launcherkioscotgt",
-  "versionCode": 89,
-  "versionName": "89.0-internal-help-viewer",
-  "apkUrl": "https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/v89.0/LauncherKioscoTGT-v89.0.apk",
+  "versionCode": 90,
+  "versionName": "90.0-final-maintenance",
+  "apkUrl": "https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/v90.0/LauncherKioscoTGT-v90.0.apk",
   "sizeBytes": 7036442,
-  "sha256": "86d63c566e5864deb028a1b6a6e8018194a613ce2541a0857ef091349becb292"
+  "sha256": "a2f1e35bbbcb4ba57030c3c18f47ba7f8e70c565a5b96563d2ac16586d0a65e8"
 }
