@@ -1,8 +1,8 @@
 {
   "package": "com.grupotgt.launcherkioscotgt",
-  "versionCode": 90,
-  "versionName": "90.0-final-maintenance",
-  "apkUrl": "https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/v90.0/LauncherKioscoTGT-v90.0.apk",
-  "sizeBytes": 7036442,
-  "sha256": "a2f1e35bbbcb4ba57030c3c18f47ba7f8e70c565a5b96563d2ac16586d0a65e8"
+  "versionCode": 91,
+  "versionName": "91.0-professional-fleet-console",
+  "apkUrl": "https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/v91.0/LauncherKioscoTGT-v91.0.apk",
+  "sizeBytes": 9272858,
+  "sha256": "dd54dc1363a4f381dea5fe933f4444e63c9fbdf5681ad5e36044c05feb499016"
 }
