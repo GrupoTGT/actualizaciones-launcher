@@ -1,8 +1,8 @@
 {
   "package": "com.grupotgt.launcherkioscotgt",
-  "versionCode": 95,
-  "versionName": "95.0-operational-diagnostics",
-  "apkUrl": "https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/v95.0/LauncherKioscoTGT-v95.0.apk",
+  "versionCode": 96,
+  "versionName": "96.0-honor-home-handoff",
+  "apkUrl": "https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/v96.0/LauncherKioscoTGT-v96.0.apk",
   "sizeBytes": 9293423,
-  "sha256": "66fd04b3bf4c74f0853fdbf79fac96169231a8e75162cd23d65160299e6ca771"
+  "sha256": "48bd1649c7a2e823310d99352250e92494c62d4ead397f5ebe729cc46db92708"
 }
