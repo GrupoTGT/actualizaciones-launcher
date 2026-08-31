@@ -1,8 +1,8 @@
 {
   "package": "com.grupotgt.launcherkioscotgt",
-  "versionCode": 99,
-  "versionName": "99.0-managed-dialer",
-  "apkUrl": "https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/v99.0/LauncherKioscoTGT-v99.0.apk",
+  "versionCode": 100,
+  "versionName": "100.0-call-loop-guard",
+  "apkUrl": "https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/v100.0/LauncherKioscoTGT-v100.0.apk",
   "sizeBytes": 9326359,
-  "sha256": "d4468cc5c7bca05f69e33d982d6d018711d46a044bc877ed44b0a81d3a6470f7"
+  "sha256": "7857ed12de941dbd0b30ebf08fcde9917fbea951890ceb7c9133f909e11e2af8"
 }
