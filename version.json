@@ -1,8 +1,8 @@
 {
   "package": "com.grupotgt.launcherkioscotgt",
-  "versionCode": 98,
-  "versionName": "98.0-secure-call-audio",
-  "apkUrl": "https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/v98.0/LauncherKioscoTGT-v98.0.apk",
-  "sizeBytes": 9314071,
-  "sha256": "5781137b3567ea90a84a1b3e2e90c962da9a046712bc7067b0d6dc01c7713203"
+  "versionCode": 99,
+  "versionName": "99.0-managed-dialer",
+  "apkUrl": "https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/v99.0/LauncherKioscoTGT-v99.0.apk",
+  "sizeBytes": 9326359,
+  "sha256": "d4468cc5c7bca05f69e33d982d6d018711d46a044bc877ed44b0a81d3a6470f7"
 }
