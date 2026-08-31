@@ -1,8 +1,8 @@
 {
   "package": "com.grupotgt.launcherkioscotgt",
-  "versionCode": 96,
-  "versionName": "96.0-honor-home-handoff",
-  "apkUrl": "https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/v96.0/LauncherKioscoTGT-v96.0.apk",
-  "sizeBytes": 9293423,
-  "sha256": "48bd1649c7a2e823310d99352250e92494c62d4ead397f5ebe729cc46db92708"
+  "versionCode": 97,
+  "versionName": "97.0-call-controls-managed-free",
+  "apkUrl": "https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/v97.0/LauncherKioscoTGT-v97.0.apk",
+  "sizeBytes": 9309919,
+  "sha256": "4e3b0da262292da3fc70589f6009c490967406e0f8c9d1c3ad087af34577ee29"
 }
