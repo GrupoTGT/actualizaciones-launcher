@@ -1,8 +1,8 @@
 {
   "package": "com.grupotgt.launcherkioscotgt",
-  "versionCode": 101,
-  "versionName": "101.0-fast-sync-mac",
-  "apkUrl": "https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/v101.0/LauncherKioscoTGT-v101.0.apk",
-  "sizeBytes": 9330455,
-  "sha256": "f593edf41ae5fc39c183fa8c216fe92be8eacd139785618999aed450119f5f7a"
+  "versionCode": 102,
+  "versionName": "102.0-confirmed-calls-maintenance",
+  "apkUrl": "https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/v102.0/LauncherKioscoTGT-v102.0.apk",
+  "sizeBytes": 9334551,
+  "sha256": "2f0c324b33cd9c606054bb69293203c586eca91fd3a262e6f8441658e61956f5"
 }
