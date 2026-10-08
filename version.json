@@ -1,8 +1,8 @@
 {
   "package": "com.grupotgt.launcherkioscotgt",
-  "versionCode": 102,
-  "versionName": "102.0-confirmed-calls-maintenance",
-  "apkUrl": "https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/v102.0/LauncherKioscoTGT-v102.0.apk",
-  "sizeBytes": 9334551,
-  "sha256": "2f0c324b33cd9c606054bb69293203c586eca91fd3a262e6f8441658e61956f5"
+  "versionCode": 103,
+  "versionName": "103.0-retro-call-confirmation",
+  "apkUrl": "https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/v103.0/LauncherKioscoTGT-v103.0.apk",
+  "sizeBytes": 9338703,
+  "sha256": "049e782d91c1020e656fd8bf1d3c89d05ffe80c082f33fd0e79dccd9419b0d20"
 }
