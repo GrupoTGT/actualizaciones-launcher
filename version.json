@@ -1,8 +1,8 @@
 {
   "package": "com.grupotgt.launcherkioscotgt",
-  "versionCode": 106,
-  "versionName": "106.0-global-incoming-allowlist",
-  "apkUrl": "https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/v106.0/LauncherKioscoTGT-v106.0.apk",
+  "versionCode": 107,
+  "versionName": "107.0-free-incoming-call-stability",
+  "apkUrl": "https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/v107.0/LauncherKioscoTGT-v107.0.apk",
   "sizeBytes": 9338703,
-  "sha256": "445f466bfc3a8fa66bcec91807dfc93f6d2b5b516828c85608a68d70a8048127"
+  "sha256": "95d3f638d46fc3cf09643d09901e317859c2a360607532505cf88f9c9f1d4957"
 }
