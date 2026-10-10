@@ -1,8 +1,8 @@
 {
   "package": "com.grupotgt.launcherkioscotgt",
-  "versionCode": 110,
-  "versionName": "110.0-shared-agenda-terminal-experience",
-  "apkUrl": "https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/v110.0/LauncherKioscoTGT-v110.0.apk",
+  "versionCode": 111,
+  "versionName": "111.0-retro-action-colors",
+  "apkUrl": "https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/v111.0/LauncherKioscoTGT-v111.0.apk",
   "sizeBytes": 9379776,
-  "sha256": "06ab367d5fd270d041c247a6c91f8ec3af0b1237b5e32af1d6d44a33ad0ee4dc"
+  "sha256": "a9756d22157f4689f7f1ccd7bf9cf36f65db85057b367a5582bfcd3f664d80f1"
 }
