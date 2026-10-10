@@ -1,8 +1,8 @@
 {
   "package": "com.grupotgt.launcherkioscotgt",
-  "versionCode": 109,
-  "versionName": "109.0-integrated-missed-calls-it-updates",
-  "apkUrl": "https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/v109.0/LauncherKioscoTGT-v109.0.apk",
-  "sizeBytes": 9367488,
-  "sha256": "b8f3bc6fdf284d8ef3e466217425d14c24507eddb5f42c9e07b02fbb06815881"
+  "versionCode": 110,
+  "versionName": "110.0-shared-agenda-terminal-experience",
+  "apkUrl": "https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/v110.0/LauncherKioscoTGT-v110.0.apk",
+  "sizeBytes": 9379776,
+  "sha256": "06ab367d5fd270d041c247a6c91f8ec3af0b1237b5e32af1d6d44a33ad0ee4dc"
 }
