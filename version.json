@@ -1,8 +1,8 @@
 {
   "package": "com.grupotgt.launcherkioscotgt",
-  "versionCode": 112,
-  "versionName": "112.0-it-recovery",
-  "apkUrl": "https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/v112.0/LauncherKioscoTGT-v112.0.apk",
-  "sizeBytes": 9408448,
-  "sha256": "c04a733a363990ed56fe395a31441a1e060a2eae216ad2940af16402c56cf6a3"
+  "versionCode": 113,
+  "versionName": "113.0-it-guided-tools",
+  "apkUrl": "https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/v113.0/LauncherKioscoTGT-v113.0.apk",
+  "sizeBytes": 9412544,
+  "sha256": "3844b1a114e063b14c4188c54deafb71ba671ef11222a3013564f2921c09d19d"
 }
