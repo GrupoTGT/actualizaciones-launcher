@@ -1,8 +1,8 @@
 {
   "package": "com.grupotgt.launcherkioscotgt",
-  "versionCode": 111,
-  "versionName": "111.0-retro-action-colors",
-  "apkUrl": "https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/v111.0/LauncherKioscoTGT-v111.0.apk",
-  "sizeBytes": 9379776,
-  "sha256": "a9756d22157f4689f7f1ccd7bf9cf36f65db85057b367a5582bfcd3f664d80f1"
+  "versionCode": 112,
+  "versionName": "112.0-it-recovery",
+  "apkUrl": "https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/v112.0/LauncherKioscoTGT-v112.0.apk",
+  "sizeBytes": 9408448,
+  "sha256": "c04a733a363990ed56fe395a31441a1e060a2eae216ad2940af16402c56cf6a3"
 }
