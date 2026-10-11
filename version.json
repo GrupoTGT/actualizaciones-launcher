@@ -1,8 +1,8 @@
 {
   "package": "com.grupotgt.launcherkioscotgt",
-  "versionCode": 114,
-  "versionName": "114.0-it-help-center",
-  "apkUrl": "https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/v114.0/LauncherKioscoTGT-v114.0.apk",
-  "sizeBytes": 6406216,
-  "sha256": "2bb66b8f02643da83a65f2da27845dbc41ea5f178f0de89c0ccb85d4ecc4ef99"
+  "versionCode": 115,
+  "versionName": "115.0-device-settings",
+  "apkUrl": "https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/v115.0/LauncherKioscoTGT-v115.0.apk",
+  "sizeBytes": 6647880,
+  "sha256": "3cd66939f6a2fccfb7d907ec3b491e719d43f0bcf42ceef5c4c1f605ef410369"
 }
