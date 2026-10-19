@@ -1,8 +1,8 @@
 {
   "package": "com.grupotgt.launcherkioscotgt",
-  "versionCode": 115,
-  "versionName": "115.0-device-settings",
-  "apkUrl": "https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/v115.0/LauncherKioscoTGT-v115.0.apk",
+  "versionCode": 116,
+  "versionName": "116.0-sim-pin-kiosk",
+  "apkUrl": "https://github.com/GrupoTGT/actualizaciones-launcher/releases/download/v116.0/LauncherKioscoTGT-v116.0.apk",
   "sizeBytes": 6647880,
-  "sha256": "3cd66939f6a2fccfb7d907ec3b491e719d43f0bcf42ceef5c4c1f605ef410369"
+  "sha256": "b7cd49567d7a471e3447a6c5b980ed785e7544e96e7009a4853611a97f9b0821"
 }
